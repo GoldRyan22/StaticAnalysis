@@ -144,8 +144,7 @@ public class Parser
         ASTNode body = parseBlock();
         return new FuncDeclNode(type, name, args, body);
     }
-
-    // Refactored: Returns a list of nodes because "int a, b;" creates two VarDeclNodes
+    
     private List<ASTNode> parseVarDecl(String type, String firstName) {
         List<ASTNode> vars = new ArrayList<>();
         
@@ -430,3 +429,4 @@ public class Parser
         throw error(peek(), "Expect expression.");
     }
 }
+
