@@ -1,7 +1,5 @@
 import java.util.*;
 
-
-
 public class Parser 
 {
     private final List<Token> tokens;
@@ -101,13 +99,11 @@ public class Parser
         String type = parseType();
         Token nameTk = consume("ID", "Expect identifier after type.");
         
-        // 2. Functions (Start with parenthesis)
         if (check("LPAR")) {
             List<ASTNode> list = new ArrayList<>();
             list.add(parseFuncDecl(type, nameTk.value.toString()));
             return list;
         } 
-        // 3. Variables (Start with comma, assign, semicolon, or bracket)
         else {
             return parseVarDecl(type, nameTk.value.toString());
         }
@@ -153,10 +149,8 @@ public class Parser
     private List<ASTNode> parseVarDecl(String type, String firstName) {
         List<ASTNode> vars = new ArrayList<>();
         
-        // 1. Parse the first variable (the ID was already consumed by the caller)
         vars.add(parseOneVar(type, firstName));
 
-        // 2. Loop while there are commas (e.g., int a [, b, c] ;)
         while (match("COMMA")) {
             Token nextId = consume("ID", "Expect variable name after comma");
             vars.add(parseOneVar(type, nextId.value.toString()));
@@ -165,19 +159,15 @@ public class Parser
         consume("SEMICOLON", "Expect ; after variable declaration");
         return vars;
     }
-
-    // Helper: Handles array brackets and initialization for a single variable
     private VarDeclNode parseOneVar(String baseType, String name) {
         String currentType = baseType;
 
-        // Check for Array: int a[10]
         if (match("LBRACKET")) {
              Token size = consume("CT_INT", "Expect array size");
              consume("RBRACKET", "Expect ]");
              currentType += "[" + size.value + "]";
         }
 
-        // Check for Initialization: = 5
         ASTNode init = null;
         if (match("ASSIGN")) {
             init = parseExpression();
