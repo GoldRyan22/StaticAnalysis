@@ -25,6 +25,7 @@ public class SemanticAnalyzer {
     private List<SemanticError> errors;
     private List<SemanticError> warnings;
     private String currentFunction;
+    private Map<String, StructDeclNode> structDefinitions;
     
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
@@ -32,12 +33,15 @@ public class SemanticAnalyzer {
         this.errors = new ArrayList<>();
         this.warnings = new ArrayList<>();
         this.currentFunction = null;
+        this.structDefinitions = new HashMap<>();
     }
     
     public void analyze(ProgramNode program) {
-        // First pass: collect all declarations (functions, typedefs, global vars)
+        // First pass: collect all declarations (functions, typedefs, global vars, structs)
         for (ASTNode node : program.declarations) {
-            if (node instanceof TypedefDeclNode) {
+            if (node instanceof StructDeclNode) {
+                analyzeStructDeclaration((StructDeclNode) node);
+            } else if (node instanceof TypedefDeclNode) {
                 analyzeTypedef((TypedefDeclNode) node);
             } else if (node instanceof FuncDeclNode) {
                 analyzeFunctionDeclaration((FuncDeclNode) node);
@@ -52,6 +56,14 @@ public class SemanticAnalyzer {
                 analyzeFunctionBody((FuncDeclNode) node);
             }
         }
+    }
+    
+    private void analyzeStructDeclaration(StructDeclNode node) {
+        if (structDefinitions.containsKey(node.name)) {
+            addError("Struct '" + node.name + "' already declared");
+            return;
+        }
+        structDefinitions.put(node.name, node);
     }
     
     private void analyzeTypedef(TypedefDeclNode node) {
@@ -348,6 +360,15 @@ public class SemanticAnalyzer {
         }
         else if (node instanceof BinaryExprNode) {
             BinaryExprNode binExpr = (BinaryExprNode) node;
+            
+            // Handle member access operators
+            if (binExpr.operator.equals("->")) {
+                return handleArrowOperator(binExpr);
+            }
+            if (binExpr.operator.equals(".")) {
+                return handleDotOperator(binExpr);
+            }
+            
             String leftType = inferType(binExpr.left);
             String rightType = inferType(binExpr.right);
             
@@ -396,6 +417,63 @@ public class SemanticAnalyzer {
             return "unknown";
         }
         
+        return "unknown";
+    }
+    
+    private String handleArrowOperator(BinaryExprNode node) {
+        // ptr->member: left should be pointer to struct
+        String leftType = inferType(node.left);
+        
+        // Get member name from right side
+        if (!(node.right instanceof IdNode)) {
+            addError("Right side of -> must be a member name");
+            return "unknown";
+        }
+        String memberName = ((IdNode) node.right).name;
+        
+        // Left should be a pointer to struct
+        if (!leftType.contains("*")) {
+            addError("Left side of -> must be a pointer");
+            return "unknown";
+        }
+        
+        // Remove pointer to get base struct type
+        String baseType = leftType.replaceFirst("\\*", "").trim();
+        
+        return getMemberType(baseType, memberName);
+    }
+    
+    private String handleDotOperator(BinaryExprNode node) {
+        // struct.member: left should be struct
+        String leftType = inferType(node.left);
+        
+        // Get member name from right side
+        if (!(node.right instanceof IdNode)) {
+            addError("Right side of . must be a member name");
+            return "unknown";
+        }
+        String memberName = ((IdNode) node.right).name;
+        
+        return getMemberType(leftType, memberName);
+    }
+    
+    private String getMemberType(String structType, String memberName) {
+        // Extract struct name from "struct StructName" format
+        String structName = structType.replaceFirst("^struct\\s+", "").trim();
+        
+        StructDeclNode structDef = structDefinitions.get(structName);
+        if (structDef == null) {
+            return "unknown";
+        }
+        
+        // Find the member in struct fields
+        for (VarDeclNode field : structDef.fields) {
+            if (field.name.equals(memberName)) {
+                return field.type;
+            }
+        }
+        
+        addError("Struct '" + structName + "' has no member named '" + memberName + "'");
         return "unknown";
     }
     

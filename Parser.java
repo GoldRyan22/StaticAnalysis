@@ -106,11 +106,23 @@ public class Parser
             return list;
         }
 
-        // 2. Structs
+        // 2. Struct declarations (struct Name { ... })
+        // Check if it's a struct definition vs struct type usage
         if (check("STRUCT")) {
-            List<ASTNode> list = new ArrayList<>();
-            list.add(parseStructDecl());
-            return list;
+            int savedPos = current;
+            advance(); // consume STRUCT
+            if (check("ID")) {
+                advance(); // consume struct name
+                if (check("LACC")) {
+                    // It's a struct declaration: struct Name { ... }
+                    current = savedPos; // reset position
+                    List<ASTNode> list = new ArrayList<>();
+                    list.add(parseStructDecl());
+                    return list;
+                }
+            }
+            // Not a struct declaration, reset and parse as type
+            current = savedPos;
         }
 
         String type = parseType();
@@ -399,9 +411,10 @@ public class Parser
     private ASTNode parseAddSub() 
     {
         ASTNode expr = parseTerm();
-        while (check("ADD") || check("SUB")) 
+        while (check("ADD") || check("SUB") || check("SUBFinal")) 
         {
-            String op = advance().code.equals("ADD") ? "+" : "-";
+            Token opToken = advance();
+            String op = opToken.code.equals("ADD") ? "+" : "-";
             ASTNode right = parseTerm();
             expr = new BinaryExprNode(expr, op, right);
         }
@@ -422,12 +435,12 @@ public class Parser
 
     private ASTNode parseUnary() 
     {
-        if (check("NOT") || check("SUB") || check("MUL") || check("AND") || check("BITAND")) 
+        if (check("NOT") || check("SUB") || check("SUBFinal") || check("MUL") || check("AND") || check("BITAND")) 
         {
             Token op = advance();
             String operator;
             if (op.code.equals("NOT")) operator = "!";
-            else if (op.code.equals("SUB")) operator = "-";
+            else if (op.code.equals("SUB") || op.code.equals("SUBFinal")) operator = "-";
             else if (op.code.equals("MUL")) operator = "*";  // Dereference
             else if (op.code.equals("AND") || op.code.equals("BITAND")) operator = "&";  // Address-of
             else operator = op.code;
@@ -435,7 +448,35 @@ public class Parser
             ASTNode right = parseUnary();
             return new UnaryExprNode(operator, right);
         }
-        return parsePrimary();
+        return parsePostfix();
+    }
+
+    private ASTNode parsePostfix() {
+        ASTNode expr = parsePrimary();
+        
+        while (true) {
+            if (match("ARROW")) {
+                // ptr->member
+                Token member = consume("ID", "Expect member name after '->'.");
+                expr = new BinaryExprNode(expr, "->", new IdNode(member.value.toString()));
+            }
+            else if (match("DOT")) {
+                // struct.member
+                Token member = consume("ID", "Expect member name after '.'.");
+                expr = new BinaryExprNode(expr, ".", new IdNode(member.value.toString()));
+            }
+            else if (match("LBRACKET")) {
+                // array[index]
+                ASTNode index = parseExpression();
+                consume("RBRACKET", "Expect ']'");
+                expr = new BinaryExprNode(expr, "[", index);
+            }
+            else {
+                break;
+            }
+        }
+        
+        return expr;
     }
 
     private ASTNode parsePrimary() {
@@ -469,15 +510,7 @@ public class Parser
                 return new FuncCallNode(t.value.toString(), args);
             }
             
-            ASTNode node = new IdNode(t.value.toString());
-            while (match("LBRACKET")) 
-            {
-                ASTNode index = parseExpression();
-                consume("RBRACKET", "Expect ]");
-                node = new BinaryExprNode(node, "[", index);
-            }
-            
-            return node;
+            return new IdNode(t.value.toString());
         }
         
         throw error(peek(), "Expect expression.");

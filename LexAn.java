@@ -146,7 +146,15 @@ class State0 extends States
         {
             newState = new IDKEY_BurnState();
         }
-
+        else if(currentChar == '#')
+        {
+            newState = new PreprocessorBurnState();
+        }
+        else
+        {
+            // Default: skip unknown characters
+            newState = new State0();
+        }
 
         
         return newState;    
@@ -423,7 +431,36 @@ class CT_STRINGState extends FinalState{};
 
 class ADDState extends FinalState{}
 
-class SUBState extends FinalState{}
+class SUBState extends States
+{
+    @Override
+    States HandleState(char currentChar) 
+    {
+        if(currentChar == '>')
+        {
+            newState = new ARROWgetGT();
+        }
+        else
+        {
+            newState = new SUBFinalState();
+        }
+        return newState;
+    }
+}
+
+class SUBFinalState extends FinalState{}
+
+class ARROWgetGT extends States
+{
+    @Override
+    States HandleState(char currentChar) 
+    {
+        newState = new ARROWState();
+        return newState;
+    }
+}
+
+class ARROWState extends FinalState{}
 
 class MULState extends FinalState{}
 
@@ -702,6 +739,28 @@ class LineComBurnState extends States
 
 class LINECOMMENTState extends FinalState{}
 
+class PreprocessorBurnState extends States
+{
+
+    @Override
+    States HandleState(char currentChar) 
+    {
+        if(currentChar !='\n' && currentChar !='\r' && currentChar !='\0')
+        {
+            newState = new PreprocessorBurnState();
+        }
+        else
+        {
+            newState = new PREPROCESSORState();
+        }
+
+        return newState;
+    }
+    
+}
+
+class PREPROCESSORState extends FinalState{}
+
 class CommBurnState extends States
 {
 
@@ -761,7 +820,7 @@ public class LexAn
 
     States TheState = new State0();
 
-    List<Token> LexicalAnalysis(String fileName)
+    public List<Token> LexicalAnalysis(String fileName)
     {
         try 
         {
@@ -801,7 +860,7 @@ public class LexAn
                     int nameLen = codeName.length();
                     codeName = codeName.subSequence(0, nameLen-5).toString();
 
-                    if(!codeName.equals("COMMENT") && !codeName.equals("LINECOMMENT"))
+                    if(!codeName.equals("COMMENT") && !codeName.equals("LINECOMMENT") && !codeName.equals("PREPROCESSOR"))
                     {
                         Token newToken = new Token(lineCount, TokenValue, codeName);
                         tokenList.add(newToken);

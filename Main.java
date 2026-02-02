@@ -30,10 +30,8 @@ public class Main
             Parser parser = new Parser(tokens);
             ProgramNode tree = (ProgramNode) parser.parse();
             
-            System.out.println("╔════════════════════════════════════════════════════════╗");
-            System.out.println("║   STATIC ANALYSIS TOOL FOR C                            ║");
-            System.out.println("║   File: " + String.format("%-45s", filename) + "║");
-            System.out.println("╚════════════════════════════════════════════════════════╝");
+            System.out.println("  STATIC ANALYSIS TOOL FOR C   ");
+         
             
             // Show AST
             if (showAll || showAst) {
