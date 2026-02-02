@@ -1,35 +1,45 @@
 import java.util.ArrayList;
 import java.util.List;
 
-enum code 
-{
-   ID("ID"), BREAK("BREAK"), CHAR("CHAR"), DOUBLE("DOUBLE"), ELSE("ELSE"), FOR("FOR"), IF("IF"), INT("INT"), RETURN("RETURN"), STRUCT("STRUCT"), VOID("VOID"), WHILE("WHILE"), CT_INT("CT_INT"), CT_REAL("CT_REAL"), CT_CHAR("CT_CHAR"), CT_STRING("CT_STRING"), COMMA("COMMA"), SEMICOLON("SEMICOLON"), LPAR("LPAR"), RPAR("RPAR"), LBRACKET("LBRACKET"), RBRACKET("RBRACKET"), LACC("LACC"), RACC("RACC"), ADD("ADD"), SUB("SUB"), MUL("MUL"), DIV("DIV"), DOT("DOT"), AND("AND"), OR("OR"), NOT("NOT"), ASSIGN("ASSIGN"), EQUAL("EQUAL"), NOTEQ("NOTEQ"), LESS("LESS"), LESSEQ("LESSEQ"), GREATER("GREATER"), GREATEREQ("GREATEREQ");
-
-   String codeName;
-
-   code(String codeName)
-   {
-      this.codeName = codeName;
-   }
-
-}
-
 class KW_List
 {
    List<String> kwList= new ArrayList<>();
 
    public KW_List() 
    {
+      kwList.add("auto");
       kwList.add("break");
+      kwList.add("case");
       kwList.add("char");
+      kwList.add("const");
+      kwList.add("continue");
+      kwList.add("default");
+      kwList.add("do");
       kwList.add("double");
       kwList.add("else");
+      kwList.add("enum");
+      kwList.add("extern");
+      kwList.add("float");
       kwList.add("for");
+      kwList.add("goto");
       kwList.add("if");
+      kwList.add("inline");
       kwList.add("int");
+      kwList.add("long");
+      kwList.add("register");
+      kwList.add("restrict");
       kwList.add("return");
+      kwList.add("short");
+      kwList.add("signed");
+      kwList.add("sizeof");
+      kwList.add("static");
       kwList.add("struct");
+      kwList.add("switch");
+      kwList.add("typedef");
+      kwList.add("union");
+      kwList.add("unsigned");
       kwList.add("void");
+      kwList.add("volatile");
       kwList.add("while");
    }
 }

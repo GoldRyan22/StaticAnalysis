@@ -453,9 +453,13 @@ class PartialAndState extends States
             newState = new AndGetAnd();
             return newState;
         }
+        // Not &&, so this was just a single & - transition to BITAND final state
+        newState = new BITANDState();
         return newState;
     }
 }
+
+class BITANDState extends FinalState{}
 
 class ANDState extends FinalState{}
 
@@ -481,9 +485,13 @@ class PartialOrState extends States
             newState = new OrGetOr();
             return newState;
         }
+        // Not ||, so this was just a single | - transition to BITOR final state
+        newState = new BITORState();
         return newState;
     }
 }
+
+class BITORState extends FinalState{}
 
 class ORState extends FinalState{}
 

@@ -118,6 +118,24 @@ class StructDeclNode extends ASTNode
     }
 }
 
+class TypedefDeclNode extends ASTNode 
+{
+    String baseType;
+    String newTypeName;
+
+    public TypedefDeclNode(String baseType, String newTypeName) 
+    {
+        this.baseType = baseType;
+        this.newTypeName = newTypeName;
+    }
+
+    @Override
+    public String toString(int indent) 
+    {
+        return getIndent(indent) + "TypedefDecl: typedef " + baseType + " " + newTypeName;
+    }
+}
+
 // --- Statements ---
 
 class BlockNode extends ASTNode 

@@ -4,10 +4,12 @@ public class Parser
 {
     private final List<Token> tokens;
     private int current = 0;
+    private final Set<String> typedefNames;
 
     public Parser(List<Token> tokens) 
     {
         this.tokens = tokens;
+        this.typedefNames = new HashSet<>();
     }
 
     private List<String> FuncsList;
@@ -78,7 +80,14 @@ public class Parser
     
     private boolean checkTypeStart() 
     {
-        return check("INT") || check("DOUBLE") || check("CHAR") || check("VOID") || check("STRUCT");
+        if (check("INT") || check("DOUBLE") || check("CHAR") || check("VOID") || check("STRUCT")) {
+            return true;
+        }
+        // Check for custom typedef names
+        if (check("ID") && typedefNames.contains(peek().value.toString())) {
+            return true;
+        }
+        return false;
     }
 
     private RuntimeException error(Token token, String message) 
@@ -89,7 +98,15 @@ public class Parser
     // --- Declarations ---
 
      private List<ASTNode> parseDeclaration() {
-        // 1. Structs
+        // 1. Typedef
+        if (check("TYPEDEF")) {
+            advance(); // consume 'typedef'
+            List<ASTNode> list = new ArrayList<>();
+            list.add(parseTypedefDecl());
+            return list;
+        }
+
+        // 2. Structs
         if (check("STRUCT")) {
             List<ASTNode> list = new ArrayList<>();
             list.add(parseStructDecl());
@@ -126,6 +143,19 @@ public class Parser
         consume("RACC", "Expect }");
         consume("SEMICOLON", "Expect ;");
         return new StructDeclNode(name, fields);
+    }
+
+    private ASTNode parseTypedefDecl() 
+    {
+        String baseType = parseType();
+        Token newTypeNameTk = consume("ID", "Expect new type name after base type in typedef");
+        String newTypeName = newTypeNameTk.value.toString();
+        consume("SEMICOLON", "Expect ; after typedef");
+        
+        // Register the new type name
+        typedefNames.add(newTypeName);
+        
+        return new TypedefDeclNode(baseType, newTypeName);
     }
 
     private ASTNode parseFuncDecl(String type, String name) 
@@ -179,16 +209,33 @@ public class Parser
 
     private String parseType() 
     {
-        if (match("INT")) return "int";
-        if (match("DOUBLE")) return "double";
-        if (match("CHAR")) return "char";
-        if (match("VOID")) return "void";
-        if (match("STRUCT")) 
+        String baseType;
+        
+        if (match("INT")) baseType = "int";
+        else if (match("DOUBLE")) baseType = "double";
+        else if (match("CHAR")) baseType = "char";
+        else if (match("VOID")) baseType = "void";
+        else if (match("STRUCT")) 
         {
             Token t = consume("ID", "Expect struct name");
-            return "struct " + t.value;
+            baseType = "struct " + t.value;
         }
-        throw error(peek(), "Expect type.");
+        // Check for custom typedef names
+        else if (check("ID") && typedefNames.contains(peek().value.toString())) 
+        {
+            Token t = advance();
+            baseType = t.value.toString();
+        }
+        else {
+            throw error(peek(), "Expect type.");
+        }
+        
+        // Handle pointer types (int*, char**, etc.)
+        while (match("MUL")) {
+            baseType += "*";
+        }
+        
+        return baseType;
     }
 
     // --- Statements ---
@@ -375,11 +422,18 @@ public class Parser
 
     private ASTNode parseUnary() 
     {
-        if (check("NOT") || check("SUB")) 
+        if (check("NOT") || check("SUB") || check("MUL") || check("AND") || check("BITAND")) 
         {
-            String op = advance().code.equals("NOT") ? "!" : "-";
+            Token op = advance();
+            String operator;
+            if (op.code.equals("NOT")) operator = "!";
+            else if (op.code.equals("SUB")) operator = "-";
+            else if (op.code.equals("MUL")) operator = "*";  // Dereference
+            else if (op.code.equals("AND") || op.code.equals("BITAND")) operator = "&";  // Address-of
+            else operator = op.code;
+            
             ASTNode right = parseUnary();
-            return new UnaryExprNode(op, right);
+            return new UnaryExprNode(operator, right);
         }
         return parsePrimary();
     }

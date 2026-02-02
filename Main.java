@@ -1,37 +1,120 @@
 import java.util.*;
 
-
 public class Main 
 {
     public static void main(String[] args) 
     {
-        LexAn lex = new LexAn();
-
-        List<Token> tokens = lex.LexicalAnalysis("../tests/6.c");
-
+        if (args.length == 0) {
+            System.out.println("Usage: java Main <source_file.c>");
+            System.out.println("\nAvailable options:");
+            System.out.println("  --ast          Show AST only");
+            System.out.println("  --semantic     Show semantic analysis only");
+            System.out.println("  --cfg          Show CFG only");
+            System.out.println("  --all          Show everything (default)");
+            return;
+        }
+        
+        String filename = args[0];
+        boolean showAst = hasFlag(args, "--ast");
+        boolean showSemantic = hasFlag(args, "--semantic");
+        boolean showCfg = hasFlag(args, "--cfg");
+        boolean showAll = hasFlag(args, "--all") || (!showAst && !showSemantic && !showCfg);
+        
         try 
         {
-            Parser parser = new Parser(tokens);
-            ASTNode tree = parser.parse();
+            // Lexical Analysis
+            LexAn lex = new LexAn();
+            List<Token> tokens = lex.LexicalAnalysis(filename);
             
-            System.out.println(" Abstract Syntax Tree ");
-            System.out.println(tree.toString(0));
-            for(String funcDecl : parser.getFuncs())
-            {
-                 System.out.println(funcDecl);
+            // Syntactic Analysis
+            Parser parser = new Parser(tokens);
+            ProgramNode tree = (ProgramNode) parser.parse();
+            
+            System.out.println("╔════════════════════════════════════════════════════════╗");
+            System.out.println("║   STATIC ANALYSIS TOOL FOR C                            ║");
+            System.out.println("║   File: " + String.format("%-45s", filename) + "║");
+            System.out.println("╚════════════════════════════════════════════════════════╝");
+            
+            // Show AST
+            if (showAll || showAst) {
+                System.out.println("\n" + "=".repeat(60));
+                System.out.println("  ABSTRACT SYNTAX TREE");
+                System.out.println("=".repeat(60));
+                System.out.println(tree.toString(0));
             }
-
-        List<String> funcDecl = new ArrayList<>();
-        funcDecl = parser.getFuncs();
-
-        AiAnalyzer.analyzeFunctions(funcDecl, "int main(void)");
-    
-        System.out.println("\n");
-
-        } catch (Exception e) 
+            
+            // Semantic Analysis
+            if (showAll || showSemantic) {
+                System.out.println("\n" + "=".repeat(60));
+                System.out.println("  SEMANTIC ANALYSIS");
+                System.out.println("=".repeat(60));
+                
+                SemanticAnalyzer analyzer = new SemanticAnalyzer();
+                analyzer.analyze(tree);
+                analyzer.printResults();
+                
+                if (analyzer.hasErrors()) {
+                    System.out.println("\n✗ Compilation failed due to semantic errors.");
+                    System.exit(1);
+                }
+            }
+            
+            // Control Flow Graph Analysis
+            if (showAll || showCfg) {
+                System.out.println("\n" + "=".repeat(60));
+                System.out.println("  CONTROL FLOW GRAPH ANALYSIS");
+                System.out.println("=".repeat(60));
+                
+                List<ControlFlowGraph> cfgs = CFGBuilder.buildCFGsFromProgram(tree);
+                
+                for (ControlFlowGraph cfg : cfgs) {
+                    cfg.printCFG();
+                }
+                
+                // Summary table
+                System.out.println("\n" + "=".repeat(60));
+                System.out.println("  CYCLOMATIC COMPLEXITY SUMMARY");
+                System.out.println("=".repeat(60));
+                System.out.println(String.format("%-30s | %-12s | %s", "Function", "Complexity", "Risk Level"));
+                System.out.println("-".repeat(60));
+                
+                for (ControlFlowGraph cfg : cfgs) {
+                    int complexity = cfg.calculateCyclomaticComplexity();
+                    String risk = getRiskLevel(complexity);
+                    System.out.println(String.format("%-30s | %-12d | %s", 
+                        cfg.functionName, complexity, risk));
+                }
+                
+                System.out.println("\n✓ Total functions analyzed: " + cfgs.size());
+            }
+            
+            System.out.println("\n" + "=".repeat(60));
+            System.out.println("✓ Analysis complete - No critical errors found");
+            System.out.println("=".repeat(60));
+            
+        } 
+        catch (Exception e) 
         {
-            System.err.println("Parser Error: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("\n✗ Analysis failed:");
+            System.err.println("  " + e.getMessage());
+            if (hasFlag(args, "--debug")) {
+                e.printStackTrace();
+            }
+            System.exit(1);
         }
+    }
+    
+    private static boolean hasFlag(String[] args, String flag) {
+        for (String arg : args) {
+            if (arg.equals(flag)) return true;
+        }
+        return false;
+    }
+    
+    private static String getRiskLevel(int complexity) {
+        if (complexity <= 5) return "Low (Simple)";
+        if (complexity <= 10) return "Moderate";
+        if (complexity <= 20) return "High";
+        return "Very High";
     }
 }
