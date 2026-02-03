@@ -1,0 +1,13 @@
+digraph CFG_listInitNode {
+  rankdir=TB;
+  node [shape=box];
+  Node256 [label="ENTRY", shape=ellipse];
+  Node257 [label="EXIT", shape=ellipse];
+  Node258 [label="((node -> prev) = 0)", shape=box];
+  Node259 [label="((node -> next) = 0)", shape=box];
+  Node260 [label="((node -> value) = value)", shape=box];
+  Node256 -> Node258;
+  Node258 -> Node259;
+  Node259 -> Node260;
+  Node260 -> Node257;
+}

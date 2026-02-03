@@ -429,7 +429,36 @@ class CT_STRINGState extends FinalState{};
 
 //------------------------------------------ OPERATORS ------------------------------
 
-class ADDState extends FinalState{}
+class ADDState extends States
+{
+    @Override
+    States HandleState(char currentChar) 
+    {
+        if(currentChar == '+')
+        {
+            newState = new INCgetPlus();
+        }
+        else
+        {
+            newState = new ADDFinalState();
+        }
+        return newState;
+    }
+}
+
+class ADDFinalState extends FinalState{}
+
+class INCgetPlus extends States
+{
+    @Override
+    States HandleState(char currentChar) 
+    {
+        newState = new INCState();
+        return newState;
+    }
+}
+
+class INCState extends FinalState{}
 
 class SUBState extends States
 {
@@ -440,6 +469,10 @@ class SUBState extends States
         {
             newState = new ARROWgetGT();
         }
+        else if(currentChar == '-')
+        {
+            newState = new DECgetMinus();
+        }
         else
         {
             newState = new SUBFinalState();
@@ -449,6 +482,18 @@ class SUBState extends States
 }
 
 class SUBFinalState extends FinalState{}
+
+class DECgetMinus extends States
+{
+    @Override
+    States HandleState(char currentChar) 
+    {
+        newState = new DECState();
+        return newState;
+    }
+}
+
+class DECState extends FinalState{}
 
 class ARROWgetGT extends States
 {

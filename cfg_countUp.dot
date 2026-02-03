@@ -1,0 +1,26 @@
+digraph CFG_countUp {
+  rankdir=TB;
+  node [shape=box];
+  Node11 [label="ENTRY", shape=ellipse];
+  Node12 [label="EXIT", shape=ellipse];
+  Node13 [label="VarDecl: int count", shape=box];
+  Node14 [label="VarDecl: int i", shape=box];
+  Node15 [label="(count = 0)", shape=box];
+  Node16 [label="(i = 0)", shape=box];
+  Node17 [label="while ((i < n))", shape=diamond];
+  Node18 [label="after-loop", shape=box];
+  Node19 [label="(count = (count + 1))", shape=box];
+  Node20 [label="(i = (i + 1))", shape=box];
+  Node21 [label="return count", shape=box];
+  Node11 -> Node13;
+  Node13 -> Node14;
+  Node14 -> Node15;
+  Node15 -> Node16;
+  Node16 -> Node17;
+  Node17 -> Node19;
+  Node17 -> Node18;
+  Node18 -> Node21;
+  Node19 -> Node20;
+  Node20 -> Node17;
+  Node21 -> Node12;
+}

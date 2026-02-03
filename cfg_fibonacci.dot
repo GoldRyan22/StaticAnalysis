@@ -1,0 +1,23 @@
+digraph CFG_fibonacci {
+  rankdir=TB;
+  node [shape=box];
+  Node6 [label="ENTRY", shape=ellipse];
+  Node7 [label="EXIT", shape=ellipse];
+  Node8 [label="if ((n <= 0))", shape=diamond];
+  Node9 [label="merge", shape=box];
+  Node10 [label="return 0", shape=box];
+  Node11 [label="if ((n == 1))", shape=diamond];
+  Node12 [label="merge", shape=box];
+  Node13 [label="return 1", shape=box];
+  Node14 [label="return (fibonacci((n - 1)) + fibonacci((n - 2)))", shape=box];
+  Node6 -> Node8;
+  Node8 -> Node10;
+  Node8 -> Node11;
+  Node9 -> Node7;
+  Node10 -> Node7;
+  Node11 -> Node13;
+  Node11 -> Node14;
+  Node12 -> Node9;
+  Node13 -> Node7;
+  Node14 -> Node7;
+}

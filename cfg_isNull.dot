@@ -1,0 +1,16 @@
+digraph CFG_isNull {
+  rankdir=TB;
+  node [shape=box];
+  Node22 [label="ENTRY", shape=ellipse];
+  Node23 [label="EXIT", shape=ellipse];
+  Node24 [label="if ((ptr == 0))", shape=diamond];
+  Node25 [label="merge", shape=box];
+  Node26 [label="return 1", shape=box];
+  Node27 [label="return 0", shape=box];
+  Node22 -> Node24;
+  Node24 -> Node26;
+  Node24 -> Node25;
+  Node25 -> Node27;
+  Node26 -> Node23;
+  Node27 -> Node23;
+}

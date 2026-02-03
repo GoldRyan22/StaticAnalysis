@@ -1,0 +1,13 @@
+digraph CFG_incrementCounter {
+  rankdir=TB;
+  node [shape=box];
+  Node39 [label="ENTRY", shape=ellipse];
+  Node40 [label="EXIT", shape=ellipse];
+  Node41 [label="VarDecl: int next", shape=box];
+  Node42 [label="(next = (current + 1))", shape=box];
+  Node43 [label="return next", shape=box];
+  Node39 -> Node41;
+  Node41 -> Node42;
+  Node42 -> Node43;
+  Node43 -> Node40;
+}

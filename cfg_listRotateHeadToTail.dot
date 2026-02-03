@@ -1,0 +1,28 @@
+digraph CFG_listRotateHeadToTail {
+  rankdir=TB;
+  node [shape=box];
+  Node229 [label="ENTRY", shape=ellipse];
+  Node230 [label="EXIT", shape=ellipse];
+  Node231 [label="if ((listLength(list) <= 1))", shape=diamond];
+  Node232 [label="merge", shape=box];
+  Node233 [label="return ", shape=box];
+  Node234 [label="VarDecl: listNode* head = (list -> head)", shape=box];
+  Node235 [label="((list -> head) = (head -> next))", shape=box];
+  Node236 [label="(((list -> head) -> prev) = 0)", shape=box];
+  Node237 [label="(((list -> tail) -> next) = head)", shape=box];
+  Node238 [label="((head -> next) = 0)", shape=box];
+  Node239 [label="((head -> prev) = (list -> tail))", shape=box];
+  Node240 [label="((list -> tail) = head)", shape=box];
+  Node229 -> Node231;
+  Node231 -> Node233;
+  Node231 -> Node232;
+  Node232 -> Node234;
+  Node233 -> Node230;
+  Node234 -> Node235;
+  Node235 -> Node236;
+  Node236 -> Node237;
+  Node237 -> Node238;
+  Node238 -> Node239;
+  Node239 -> Node240;
+  Node240 -> Node230;
+}

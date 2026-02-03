@@ -238,16 +238,28 @@ class UnaryExprNode extends ASTNode
 {
     String operator;
     ASTNode expr;
+    boolean isPostfix;  // true for a++, false for ++a
 
     public UnaryExprNode(String operator, ASTNode expr) {
         this.operator = operator;
         this.expr = expr;
+        this.isPostfix = false;  // default to prefix
+    }
+
+    public UnaryExprNode(String operator, ASTNode expr, boolean isPostfix) {
+        this.operator = operator;
+        this.expr = expr;
+        this.isPostfix = isPostfix;
     }
 
     @Override
     public String toString(int indent) 
     {
-        return "(" + operator + expr.toString(0) + ")";
+        if (isPostfix) {
+            return "(" + expr.toString(0) + operator + ")";
+        } else {
+            return "(" + operator + expr.toString(0) + ")";
+        }
     }
 }
 

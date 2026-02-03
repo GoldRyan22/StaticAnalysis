@@ -1,0 +1,28 @@
+digraph CFG_listLinkNodeHead {
+  rankdir=TB;
+  node [shape=box];
+  Node50 [label="ENTRY", shape=ellipse];
+  Node51 [label="EXIT", shape=ellipse];
+  Node52 [label="if (((list -> len) == 0))", shape=diamond];
+  Node53 [label="merge", shape=box];
+  Node54 [label="((list -> head) = ((list -> tail) = node))", shape=box];
+  Node55 [label="((node -> prev) = 0)", shape=box];
+  Node56 [label="((node -> next) = 0)", shape=box];
+  Node57 [label="((node -> prev) = 0)", shape=box];
+  Node58 [label="((node -> next) = (list -> head))", shape=box];
+  Node59 [label="(((list -> head) -> prev) = node)", shape=box];
+  Node60 [label="((list -> head) = node)", shape=box];
+  Node61 [label="((list -> len)++)", shape=box];
+  Node50 -> Node52;
+  Node52 -> Node54;
+  Node52 -> Node57;
+  Node53 -> Node61;
+  Node54 -> Node55;
+  Node55 -> Node56;
+  Node56 -> Node53;
+  Node57 -> Node58;
+  Node58 -> Node59;
+  Node59 -> Node60;
+  Node60 -> Node53;
+  Node61 -> Node51;
+}

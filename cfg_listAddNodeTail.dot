@@ -1,0 +1,22 @@
+digraph CFG_listAddNodeTail {
+  rankdir=TB;
+  node [shape=box];
+  Node62 [label="ENTRY", shape=ellipse];
+  Node63 [label="EXIT", shape=ellipse];
+  Node64 [label="VarDecl: listNode* node", shape=box];
+  Node65 [label="if (((node = zmalloc(16)) == 0))", shape=diamond];
+  Node66 [label="merge", shape=box];
+  Node67 [label="return 0", shape=box];
+  Node68 [label="((node -> value) = value)", shape=box];
+  Node69 [label="listLinkNodeTail(list, node)", shape=box];
+  Node70 [label="return list", shape=box];
+  Node62 -> Node64;
+  Node64 -> Node65;
+  Node65 -> Node67;
+  Node65 -> Node66;
+  Node66 -> Node68;
+  Node67 -> Node63;
+  Node68 -> Node69;
+  Node69 -> Node70;
+  Node70 -> Node63;
+}

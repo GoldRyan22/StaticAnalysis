@@ -1,0 +1,26 @@
+digraph CFG_loopTest {
+  rankdir=TB;
+  node [shape=box];
+  Node26 [label="ENTRY", shape=ellipse];
+  Node27 [label="EXIT", shape=ellipse];
+  Node28 [label="VarDecl: int sum", shape=box];
+  Node29 [label="VarDecl: int i", shape=box];
+  Node30 [label="(sum = 0)", shape=box];
+  Node31 [label="(i = 0)", shape=box];
+  Node32 [label="while ((i < n))", shape=diamond];
+  Node33 [label="after-loop", shape=box];
+  Node34 [label="(sum = (sum + i))", shape=box];
+  Node35 [label="(i = (i + 1))", shape=box];
+  Node36 [label="return sum", shape=box];
+  Node26 -> Node28;
+  Node28 -> Node29;
+  Node29 -> Node30;
+  Node30 -> Node31;
+  Node31 -> Node32;
+  Node32 -> Node34;
+  Node32 -> Node33;
+  Node33 -> Node36;
+  Node34 -> Node35;
+  Node35 -> Node32;
+  Node36 -> Node27;
+}

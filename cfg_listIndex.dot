@@ -1,0 +1,36 @@
+digraph CFG_listIndex {
+  rankdir=TB;
+  node [shape=box];
+  Node202 [label="ENTRY", shape=ellipse];
+  Node203 [label="EXIT", shape=ellipse];
+  Node204 [label="VarDecl: listNode* n", shape=box];
+  Node205 [label="if ((index < 0))", shape=diamond];
+  Node206 [label="merge", shape=box];
+  Node207 [label="(index = ((-index) - 1))", shape=box];
+  Node208 [label="(n = (list -> tail))", shape=box];
+  Node209 [label="while (((index--) && n))", shape=diamond];
+  Node210 [label="after-loop", shape=box];
+  Node211 [label="(n = (n -> prev))", shape=box];
+  Node212 [label="(n = (list -> head))", shape=box];
+  Node213 [label="while (((index--) && n))", shape=diamond];
+  Node214 [label="after-loop", shape=box];
+  Node215 [label="(n = (n -> next))", shape=box];
+  Node216 [label="return n", shape=box];
+  Node202 -> Node204;
+  Node204 -> Node205;
+  Node205 -> Node207;
+  Node205 -> Node212;
+  Node206 -> Node216;
+  Node207 -> Node208;
+  Node208 -> Node209;
+  Node209 -> Node211;
+  Node209 -> Node210;
+  Node210 -> Node206;
+  Node211 -> Node209;
+  Node212 -> Node213;
+  Node213 -> Node215;
+  Node213 -> Node214;
+  Node214 -> Node206;
+  Node215 -> Node213;
+  Node216 -> Node203;
+}

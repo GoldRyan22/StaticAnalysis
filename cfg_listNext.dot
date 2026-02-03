@@ -1,0 +1,25 @@
+digraph CFG_listNext {
+  rankdir=TB;
+  node [shape=box];
+  Node145 [label="ENTRY", shape=ellipse];
+  Node146 [label="EXIT", shape=ellipse];
+  Node147 [label="VarDecl: listNode* current = (iter -> next)", shape=box];
+  Node148 [label="if ((current != 0))", shape=diamond];
+  Node149 [label="merge", shape=box];
+  Node150 [label="if (((iter -> direction) == AL_START_HEAD))", shape=diamond];
+  Node151 [label="merge", shape=box];
+  Node152 [label="((iter -> next) = (current -> next))", shape=box];
+  Node153 [label="((iter -> next) = (current -> prev))", shape=box];
+  Node154 [label="return current", shape=box];
+  Node145 -> Node147;
+  Node147 -> Node148;
+  Node148 -> Node150;
+  Node148 -> Node149;
+  Node149 -> Node154;
+  Node150 -> Node152;
+  Node150 -> Node153;
+  Node151 -> Node149;
+  Node152 -> Node151;
+  Node153 -> Node151;
+  Node154 -> Node146;
+}

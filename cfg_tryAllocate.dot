@@ -1,0 +1,20 @@
+digraph CFG_tryAllocate {
+  rankdir=TB;
+  node [shape=box];
+  Node44 [label="ENTRY", shape=ellipse];
+  Node45 [label="EXIT", shape=ellipse];
+  Node46 [label="VarDecl: int* result", shape=box];
+  Node47 [label="if ((shouldAlloc == 1))", shape=diamond];
+  Node48 [label="merge", shape=box];
+  Node49 [label="(result = allocateInt())", shape=box];
+  Node50 [label="(result = 0)", shape=box];
+  Node51 [label="return result", shape=box];
+  Node44 -> Node46;
+  Node46 -> Node47;
+  Node47 -> Node49;
+  Node47 -> Node50;
+  Node48 -> Node51;
+  Node49 -> Node48;
+  Node50 -> Node48;
+  Node51 -> Node45;
+}

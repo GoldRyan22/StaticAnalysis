@@ -1,0 +1,27 @@
+digraph CFG_classify {
+  rankdir=TB;
+  node [shape=box];
+  Node15 [label="ENTRY", shape=ellipse];
+  Node16 [label="EXIT", shape=ellipse];
+  Node17 [label="VarDecl: int result", shape=box];
+  Node18 [label="if ((x < 0))", shape=diamond];
+  Node19 [label="merge", shape=box];
+  Node20 [label="(result = (-1))", shape=box];
+  Node21 [label="if ((x == 0))", shape=diamond];
+  Node22 [label="merge", shape=box];
+  Node23 [label="(result = 0)", shape=box];
+  Node24 [label="(result = 1)", shape=box];
+  Node25 [label="return result", shape=box];
+  Node15 -> Node17;
+  Node17 -> Node18;
+  Node18 -> Node20;
+  Node18 -> Node21;
+  Node19 -> Node25;
+  Node20 -> Node19;
+  Node21 -> Node23;
+  Node21 -> Node24;
+  Node22 -> Node19;
+  Node23 -> Node22;
+  Node24 -> Node22;
+  Node25 -> Node16;
+}

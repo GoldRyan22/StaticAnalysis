@@ -1,0 +1,28 @@
+digraph CFG_listLinkNodeTail {
+  rankdir=TB;
+  node [shape=box];
+  Node71 [label="ENTRY", shape=ellipse];
+  Node72 [label="EXIT", shape=ellipse];
+  Node73 [label="if (((list -> len) == 0))", shape=diamond];
+  Node74 [label="merge", shape=box];
+  Node75 [label="((list -> head) = ((list -> tail) = node))", shape=box];
+  Node76 [label="((node -> prev) = 0)", shape=box];
+  Node77 [label="((node -> next) = 0)", shape=box];
+  Node78 [label="((node -> prev) = (list -> tail))", shape=box];
+  Node79 [label="((node -> next) = 0)", shape=box];
+  Node80 [label="(((list -> tail) -> next) = node)", shape=box];
+  Node81 [label="((list -> tail) = node)", shape=box];
+  Node82 [label="((list -> len)++)", shape=box];
+  Node71 -> Node73;
+  Node73 -> Node75;
+  Node73 -> Node78;
+  Node74 -> Node82;
+  Node75 -> Node76;
+  Node76 -> Node77;
+  Node77 -> Node74;
+  Node78 -> Node79;
+  Node79 -> Node80;
+  Node80 -> Node81;
+  Node81 -> Node74;
+  Node82 -> Node72;
+}

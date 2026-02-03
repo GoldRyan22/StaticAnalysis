@@ -1,3 +1,5 @@
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.*;
 
 public class Main 
@@ -42,6 +44,7 @@ public class Main
             }
             
             // Semantic Analysis
+            boolean hasSemanticErrors = false;
             if (showAll || showSemantic) {
                 System.out.println("\n" + "=".repeat(60));
                 System.out.println("  SEMANTIC ANALYSIS");
@@ -51,10 +54,7 @@ public class Main
                 analyzer.analyze(tree);
                 analyzer.printResults();
                 
-                if (analyzer.hasErrors()) {
-                    System.out.println("\n✗ Compilation failed due to semantic errors.");
-                    System.exit(1);
-                }
+                hasSemanticErrors = analyzer.hasErrors();
             }
             
             // Control Flow Graph Analysis
@@ -67,7 +67,37 @@ public class Main
                 
                 for (ControlFlowGraph cfg : cfgs) {
                     cfg.printCFG();
+
+                    String dotFilename = "cfg_" + cfg.functionName + ".dot";
+                    String pngFilename = "cfg_" + cfg.functionName + ".png";
+                    
+                    try (PrintWriter writer = new PrintWriter(dotFilename)) 
+                    {
+                        writer.print(cfg.toDot());
+                        System.out.println("Generated: " + dotFilename);
+                    } 
+                    catch (IOException e) 
+                    {
+                        System.err.println("Error writing " + dotFilename + ": " + e.getMessage());
+                    }
+                    
+                    // Generate PNG from DOT file
+                    try {
+                        ProcessBuilder pb = new ProcessBuilder("dot", "-Tpng", dotFilename, "-o", pngFilename);
+                        Process process = pb.start();
+                        int exitCode = process.waitFor();
+                        if (exitCode == 0) {
+                            System.out.println("Generated: " + pngFilename);
+                        } else {
+                            System.err.println("Warning: Failed to generate " + pngFilename + " (exit code: " + exitCode + ")");
+                        }
+                    } catch (IOException | InterruptedException e) {
+                        System.err.println("Warning: Could not generate PNG (is Graphviz installed?): " + e.getMessage());
+                    }
+
                 }
+
+                
                 
                 // Summary table
                 System.out.println("\n" + "=".repeat(60));
@@ -87,7 +117,11 @@ public class Main
             }
             
             System.out.println("\n" + "=".repeat(60));
-            System.out.println("✓ Analysis complete - No critical errors found");
+            if (hasSemanticErrors) {
+                System.out.println("⚠ Analysis complete - Semantic errors found but CFG generated");
+            } else {
+                System.out.println("✓ Analysis complete - No critical errors found");
+            }
             System.out.println("=".repeat(60));
             
         } 

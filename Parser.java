@@ -159,6 +159,39 @@ public class Parser
 
     private ASTNode parseTypedefDecl() 
     {
+        // Handle: typedef struct Name { ... } TypeName;
+        if (check("STRUCT")) {
+            advance(); // consume STRUCT
+            String structName = "";
+            if (check("ID")) {
+                structName = advance().value.toString();
+            }
+            
+            consume("LACC", "Expect { after struct in typedef");
+            
+            List<VarDeclNode> fields = new ArrayList<>();
+            while (!check("RACC") && !isAtEnd()) {
+                String type = parseType();
+                String fieldName = consume("ID", "Expect field name").value.toString();
+                consume("SEMICOLON", "Expect ;");
+                fields.add(new VarDeclNode(type, fieldName, null));
+            }
+            consume("RACC", "Expect }");
+            
+            Token newTypeNameTk = consume("ID", "Expect type name after struct definition");
+            String newTypeName = newTypeNameTk.value.toString();
+            consume("SEMICOLON", "Expect ; after typedef");
+            
+            // Register the new type name
+            typedefNames.add(newTypeName);
+            
+            // Create both struct declaration and typedef
+            // For simplicity, we'll just return typedef and assume struct is implicitly defined
+            String baseType = "struct " + (structName.isEmpty() ? newTypeName : structName);
+            return new TypedefDeclNode(baseType, newTypeName);
+        }
+        
+        // Handle: typedef existing_type new_type;
         String baseType = parseType();
         Token newTypeNameTk = consume("ID", "Expect new type name after base type in typedef");
         String newTypeName = newTypeNameTk.value.toString();
@@ -271,10 +304,20 @@ public class Parser
         BlockNode block = new BlockNode();
         while (!check("RACC") && !isAtEnd()) {
             if (checkTypeStart()) {
+                // Look ahead to distinguish variable declaration from expression statement
+                int savedPos = current;
                 String t = parseType();
-                String n = consume("ID", "Expect ID").value.toString();
-
-                block.statements.addAll(parseVarDecl(t, n));
+                
+                // After parsing type, check if next is ID (variable name)
+                if (check("ID")) {
+                    // This looks like a declaration
+                    String n = advance().value.toString();
+                    block.statements.addAll(parseVarDecl(t, n));
+                } else {
+                    // Not a declaration (e.g., list->field), reset and parse as expression
+                    current = savedPos;
+                    block.statements.add(parseStatement());
+                }
             } else {
                 block.statements.add(parseStatement());
             }
@@ -411,10 +454,10 @@ public class Parser
     private ASTNode parseAddSub() 
     {
         ASTNode expr = parseTerm();
-        while (check("ADD") || check("SUB") || check("SUBFinal")) 
+        while (check("ADD") || check("ADDFinal") || check("SUB") || check("SUBFinal")) 
         {
             Token opToken = advance();
-            String op = opToken.code.equals("ADD") ? "+" : "-";
+            String op = (opToken.code.equals("ADD") || opToken.code.equals("ADDFinal")) ? "+" : "-";
             ASTNode right = parseTerm();
             expr = new BinaryExprNode(expr, op, right);
         }
@@ -435,7 +478,7 @@ public class Parser
 
     private ASTNode parseUnary() 
     {
-        if (check("NOT") || check("SUB") || check("SUBFinal") || check("MUL") || check("AND") || check("BITAND")) 
+        if (check("NOT") || check("SUB") || check("SUBFinal") || check("MUL") || check("AND") || check("BITAND") || check("INC") || check("DEC")) 
         {
             Token op = advance();
             String operator;
@@ -443,6 +486,8 @@ public class Parser
             else if (op.code.equals("SUB") || op.code.equals("SUBFinal")) operator = "-";
             else if (op.code.equals("MUL")) operator = "*";  // Dereference
             else if (op.code.equals("AND") || op.code.equals("BITAND")) operator = "&";  // Address-of
+            else if (op.code.equals("INC")) operator = "++";
+            else if (op.code.equals("DEC")) operator = "--";
             else operator = op.code;
             
             ASTNode right = parseUnary();
@@ -471,6 +516,36 @@ public class Parser
                 consume("RBRACKET", "Expect ']'");
                 expr = new BinaryExprNode(expr, "[", index);
             }
+            else if (match("LPAR")) {
+                // function call: can be direct call or through function pointer
+                // expr can be an IdNode (simple call) or BinaryExprNode (member access like ptr->func)
+                List<ASTNode> args = new ArrayList<>();
+                if (!check("RPAR")) {
+                    do {
+                        args.add(parseExpression());
+                    } while (match("COMMA"));
+                }
+                consume("RPAR", "Expect ')'");
+                
+                // Create a function call node with the expression as the function
+                // For simple calls, expr is IdNode("funcName")
+                // For member access, expr is BinaryExprNode(ptr, "->", "member")
+                if (expr instanceof IdNode) {
+                    expr = new FuncCallNode(((IdNode)expr).name, args);
+                } else {
+                    // For complex expressions like ptr->func(args), we need a way to represent this
+                    // For now, create a special function call with the full expression
+                    expr = new FuncCallNode(expr.toString(0), args);
+                }
+            }
+            else if (match("INC")) {
+                // postfix ++
+                expr = new UnaryExprNode("++", expr, true);
+            }
+            else if (match("DEC")) {
+                // postfix --
+                expr = new UnaryExprNode("--", expr, true);
+            }
             else {
                 break;
             }
@@ -495,21 +570,6 @@ public class Parser
         if (check("ID")) 
         {
             Token t = advance();
-            
-            if (match("LPAR")) 
-            {
-                List<ASTNode> args = new ArrayList<>();
-                if (!check("RPAR")) 
-                {
-                    do 
-                    {
-                        args.add(parseExpression());
-                    } while (match("COMMA"));
-                }
-                consume("RPAR", "Expect )");
-                return new FuncCallNode(t.value.toString(), args);
-            }
-            
             return new IdNode(t.value.toString());
         }
         

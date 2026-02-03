@@ -1,0 +1,35 @@
+digraph CFG_listJoin {
+  rankdir=TB;
+  node [shape=box];
+  Node241 [label="ENTRY", shape=ellipse];
+  Node242 [label="EXIT", shape=ellipse];
+  Node243 [label="if (((o -> len) == 0))", shape=diamond];
+  Node244 [label="merge", shape=box];
+  Node245 [label="return ", shape=box];
+  Node246 [label="(((o -> head) -> prev) = (l -> tail))", shape=box];
+  Node247 [label="if ((l -> tail))", shape=diamond];
+  Node248 [label="merge", shape=box];
+  Node249 [label="(((l -> tail) -> next) = (o -> head))", shape=box];
+  Node250 [label="((l -> head) = (o -> head))", shape=box];
+  Node251 [label="((l -> tail) = (o -> tail))", shape=box];
+  Node252 [label="((l -> len) = ((l -> len) + (o -> len)))", shape=box];
+  Node253 [label="((o -> head) = 0)", shape=box];
+  Node254 [label="((o -> tail) = 0)", shape=box];
+  Node255 [label="((o -> len) = 0)", shape=box];
+  Node241 -> Node243;
+  Node243 -> Node245;
+  Node243 -> Node244;
+  Node244 -> Node246;
+  Node245 -> Node242;
+  Node246 -> Node247;
+  Node247 -> Node249;
+  Node247 -> Node250;
+  Node248 -> Node251;
+  Node249 -> Node248;
+  Node250 -> Node248;
+  Node251 -> Node252;
+  Node252 -> Node253;
+  Node253 -> Node254;
+  Node254 -> Node255;
+  Node255 -> Node242;
+}

@@ -1,0 +1,9 @@
+digraph CFG_listReleaseGeneric {
+  rankdir=TB;
+  node [shape=box];
+  Node38 [label="ENTRY", shape=ellipse];
+  Node39 [label="EXIT", shape=ellipse];
+  Node40 [label="listRelease(list)", shape=box];
+  Node38 -> Node40;
+  Node40 -> Node39;
+}

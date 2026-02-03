@@ -1,0 +1,18 @@
+digraph CFG_listDelNode {
+  rankdir=TB;
+  node [shape=box];
+  Node110 [label="ENTRY", shape=ellipse];
+  Node111 [label="EXIT", shape=ellipse];
+  Node112 [label="listUnlinkNode(list, node)", shape=box];
+  Node113 [label="if ((list -> free))", shape=diamond];
+  Node114 [label="merge", shape=box];
+  Node115 [label="(list -> free)((node -> value))", shape=box];
+  Node116 [label="zfree(node)", shape=box];
+  Node110 -> Node112;
+  Node112 -> Node113;
+  Node113 -> Node115;
+  Node113 -> Node114;
+  Node114 -> Node116;
+  Node115 -> Node114;
+  Node116 -> Node111;
+}

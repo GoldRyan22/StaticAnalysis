@@ -1,0 +1,11 @@
+digraph CFG_listRewindTail {
+  rankdir=TB;
+  node [shape=box];
+  Node141 [label="ENTRY", shape=ellipse];
+  Node142 [label="EXIT", shape=ellipse];
+  Node143 [label="((li -> next) = (list -> tail))", shape=box];
+  Node144 [label="((li -> direction) = AL_START_TAIL)", shape=box];
+  Node141 -> Node143;
+  Node143 -> Node144;
+  Node144 -> Node142;
+}

@@ -1,0 +1,18 @@
+digraph CFG_listRelease {
+  rankdir=TB;
+  node [shape=box];
+  Node31 [label="ENTRY", shape=ellipse];
+  Node32 [label="EXIT", shape=ellipse];
+  Node33 [label="if ((!list))", shape=diamond];
+  Node34 [label="merge", shape=box];
+  Node35 [label="return ", shape=box];
+  Node36 [label="listEmpty(list)", shape=box];
+  Node37 [label="zfree(list)", shape=box];
+  Node31 -> Node33;
+  Node33 -> Node35;
+  Node33 -> Node34;
+  Node34 -> Node36;
+  Node35 -> Node32;
+  Node36 -> Node37;
+  Node37 -> Node32;
+}

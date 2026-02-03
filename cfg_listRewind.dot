@@ -1,0 +1,11 @@
+digraph CFG_listRewind {
+  rankdir=TB;
+  node [shape=box];
+  Node137 [label="ENTRY", shape=ellipse];
+  Node138 [label="EXIT", shape=ellipse];
+  Node139 [label="((li -> next) = (list -> head))", shape=box];
+  Node140 [label="((li -> direction) = AL_START_HEAD)", shape=box];
+  Node137 -> Node139;
+  Node139 -> Node140;
+  Node140 -> Node138;
+}

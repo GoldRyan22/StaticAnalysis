@@ -1,0 +1,22 @@
+digraph CFG_listAddNodeHead {
+  rankdir=TB;
+  node [shape=box];
+  Node41 [label="ENTRY", shape=ellipse];
+  Node42 [label="EXIT", shape=ellipse];
+  Node43 [label="VarDecl: listNode* node", shape=box];
+  Node44 [label="if (((node = zmalloc(16)) == 0))", shape=diamond];
+  Node45 [label="merge", shape=box];
+  Node46 [label="return 0", shape=box];
+  Node47 [label="((node -> value) = value)", shape=box];
+  Node48 [label="listLinkNodeHead(list, node)", shape=box];
+  Node49 [label="return list", shape=box];
+  Node41 -> Node43;
+  Node43 -> Node44;
+  Node44 -> Node46;
+  Node44 -> Node45;
+  Node45 -> Node47;
+  Node46 -> Node42;
+  Node47 -> Node48;
+  Node48 -> Node49;
+  Node49 -> Node42;
+}

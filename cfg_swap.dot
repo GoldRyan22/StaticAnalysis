@@ -1,0 +1,15 @@
+digraph CFG_swap {
+  rankdir=TB;
+  node [shape=box];
+  Node5 [label="ENTRY", shape=ellipse];
+  Node6 [label="EXIT", shape=ellipse];
+  Node7 [label="VarDecl: int temp", shape=box];
+  Node8 [label="(temp = (*a))", shape=box];
+  Node9 [label="((*a) = (*b))", shape=box];
+  Node10 [label="((*b) = temp)", shape=box];
+  Node5 -> Node7;
+  Node7 -> Node8;
+  Node8 -> Node9;
+  Node9 -> Node10;
+  Node10 -> Node6;
+}

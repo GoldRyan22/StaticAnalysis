@@ -1,0 +1,18 @@
+digraph CFG_listInitIterator {
+  rankdir=TB;
+  node [shape=box];
+  Node130 [label="ENTRY", shape=ellipse];
+  Node131 [label="EXIT", shape=ellipse];
+  Node132 [label="if ((direction == AL_START_HEAD))", shape=diamond];
+  Node133 [label="merge", shape=box];
+  Node134 [label="((iter -> next) = (list -> head))", shape=box];
+  Node135 [label="((iter -> next) = (list -> tail))", shape=box];
+  Node136 [label="((iter -> direction) = direction)", shape=box];
+  Node130 -> Node132;
+  Node132 -> Node134;
+  Node132 -> Node135;
+  Node133 -> Node136;
+  Node134 -> Node133;
+  Node135 -> Node133;
+  Node136 -> Node131;
+}

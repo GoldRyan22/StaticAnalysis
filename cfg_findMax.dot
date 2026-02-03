@@ -1,0 +1,27 @@
+digraph CFG_findMax {
+  rankdir=TB;
+  node [shape=box];
+  Node28 [label="ENTRY", shape=ellipse];
+  Node29 [label="EXIT", shape=ellipse];
+  Node30 [label="VarDecl: int max", shape=box];
+  Node31 [label="(max = a)", shape=box];
+  Node32 [label="if ((b > max))", shape=diamond];
+  Node33 [label="merge", shape=box];
+  Node34 [label="(max = b)", shape=box];
+  Node35 [label="if ((c > max))", shape=diamond];
+  Node36 [label="merge", shape=box];
+  Node37 [label="(max = c)", shape=box];
+  Node38 [label="return max", shape=box];
+  Node28 -> Node30;
+  Node30 -> Node31;
+  Node31 -> Node32;
+  Node32 -> Node34;
+  Node32 -> Node33;
+  Node33 -> Node35;
+  Node34 -> Node33;
+  Node35 -> Node37;
+  Node35 -> Node36;
+  Node36 -> Node38;
+  Node37 -> Node36;
+  Node38 -> Node29;
+}

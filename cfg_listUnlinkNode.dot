@@ -1,0 +1,31 @@
+digraph CFG_listUnlinkNode {
+  rankdir=TB;
+  node [shape=box];
+  Node117 [label="ENTRY", shape=ellipse];
+  Node118 [label="EXIT", shape=ellipse];
+  Node119 [label="if ((node -> prev))", shape=diamond];
+  Node120 [label="merge", shape=box];
+  Node121 [label="(((node -> prev) -> next) = (node -> next))", shape=box];
+  Node122 [label="((list -> head) = (node -> next))", shape=box];
+  Node123 [label="if ((node -> next))", shape=diamond];
+  Node124 [label="merge", shape=box];
+  Node125 [label="(((node -> next) -> prev) = (node -> prev))", shape=box];
+  Node126 [label="((list -> tail) = (node -> prev))", shape=box];
+  Node127 [label="((node -> next) = 0)", shape=box];
+  Node128 [label="((node -> prev) = 0)", shape=box];
+  Node129 [label="((list -> len)--)", shape=box];
+  Node117 -> Node119;
+  Node119 -> Node121;
+  Node119 -> Node122;
+  Node120 -> Node123;
+  Node121 -> Node120;
+  Node122 -> Node120;
+  Node123 -> Node125;
+  Node123 -> Node126;
+  Node124 -> Node127;
+  Node125 -> Node124;
+  Node126 -> Node124;
+  Node127 -> Node128;
+  Node128 -> Node129;
+  Node129 -> Node118;
+}

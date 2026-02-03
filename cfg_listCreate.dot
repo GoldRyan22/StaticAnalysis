@@ -1,0 +1,30 @@
+digraph CFG_listCreate {
+  rankdir=TB;
+  node [shape=box];
+  Node0 [label="ENTRY", shape=ellipse];
+  Node1 [label="EXIT", shape=ellipse];
+  Node2 [label="VarDecl: struct list* list", shape=box];
+  Node3 [label="if (((list = zmalloc(16)) == 0))", shape=diamond];
+  Node4 [label="merge", shape=box];
+  Node5 [label="return 0", shape=box];
+  Node6 [label="((list -> head) = 0)", shape=box];
+  Node7 [label="((list -> tail) = 0)", shape=box];
+  Node8 [label="((list -> len) = 0)", shape=box];
+  Node9 [label="((list -> dup) = 0)", shape=box];
+  Node10 [label="((list -> free) = 0)", shape=box];
+  Node11 [label="((list -> match) = 0)", shape=box];
+  Node12 [label="return list", shape=box];
+  Node0 -> Node2;
+  Node2 -> Node3;
+  Node3 -> Node5;
+  Node3 -> Node4;
+  Node4 -> Node6;
+  Node5 -> Node1;
+  Node6 -> Node7;
+  Node7 -> Node8;
+  Node8 -> Node9;
+  Node9 -> Node10;
+  Node10 -> Node11;
+  Node11 -> Node12;
+  Node12 -> Node1;
+}

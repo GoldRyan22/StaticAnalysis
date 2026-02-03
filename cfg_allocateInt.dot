@@ -1,0 +1,13 @@
+digraph CFG_allocateInt {
+  rankdir=TB;
+  node [shape=box];
+  Node0 [label="ENTRY", shape=ellipse];
+  Node1 [label="EXIT", shape=ellipse];
+  Node2 [label="VarDecl: int* ptr", shape=box];
+  Node3 [label="(ptr = 0)", shape=box];
+  Node4 [label="return ptr", shape=box];
+  Node0 -> Node2;
+  Node2 -> Node3;
+  Node3 -> Node4;
+  Node4 -> Node1;
+}
