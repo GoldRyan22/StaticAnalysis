@@ -24,12 +24,18 @@ public class Main
         
         try 
         {
+            // Extract external types from preprocessed file
+            Set<String> externalTypes = extractTypesFromFile(filename);
+            if (!externalTypes.isEmpty()) {
+                System.out.println("Found " + externalTypes.size() + " external type(s): " + externalTypes);
+            }
+            
             // Lexical Analysis
             LexAn lex = new LexAn();
             List<Token> tokens = lex.LexicalAnalysis(filename);
             
             // Syntactic Analysis
-            Parser parser = new Parser(tokens);
+            Parser parser = new Parser(tokens, externalTypes);
             ProgramNode tree = (ProgramNode) parser.parse();
             
             System.out.println("  STATIC ANALYSIS TOOL FOR C   ");
@@ -141,6 +147,110 @@ public class Main
             if (arg.equals(flag)) return true;
         }
         return false;
+    }
+
+    /**
+     * Extract typedef names from preprocessed file that come from header files.
+     * Looks for typedef declarations before the "Source Code" marker.
+     */
+    private static Set<String> extractTypesFromFile(String filename) {
+        Set<String> types = new HashSet<>();
+        
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(filename))) {
+            StringBuilder currentTypedef = new StringBuilder();
+            boolean inHeaderSection = true;
+            boolean collectingTypedef = false;
+            
+            String line;
+            while ((line = reader.readLine()) != null) {
+                // Stop processing when we reach source code section
+                if (line.contains("===== Source Code =====")) {
+                    inHeaderSection = false;
+                    break;
+                }
+                
+                // Only process header section
+                if (!inHeaderSection) {
+                    break;
+                }
+                
+                String trimmed = line.trim();
+                
+                // Start collecting a typedef
+                if (trimmed.startsWith("typedef")) {
+                    currentTypedef = new StringBuilder();
+                    collectingTypedef = true;
+                    currentTypedef.append(trimmed);
+                    
+                    // Check if complete on one line
+                    if (trimmed.endsWith(";")) {
+                        String typedef = currentTypedef.toString();
+                        extractTypeNameFromTypedef(typedef, types);
+                        collectingTypedef = false;
+                        currentTypedef = new StringBuilder();
+                    }
+                    continue;
+                }
+                
+                // Continue collecting typedef lines
+                if (collectingTypedef) {
+                    currentTypedef.append(" ").append(trimmed);
+                    
+                    if (trimmed.endsWith(";")) {
+                        String typedef = currentTypedef.toString();
+                        extractTypeNameFromTypedef(typedef, types);
+                        collectingTypedef = false;
+                        currentTypedef = new StringBuilder();
+                    }
+                }
+            }
+        } catch (java.io.IOException e) {
+            System.err.println("Warning: Could not read file for type extraction: " + e.getMessage());
+        }
+        
+        return types;
+    }
+    
+    /**
+     * Extract the type name from a complete typedef declaration.
+     */
+    private static void extractTypeNameFromTypedef(String typedef, Set<String> types) {
+        typedef = typedef.trim();
+        
+        // Skip function pointer typedefs (e.g., typedef void func(int x);)
+        // These have pattern: typedef TYPE NAME(params);
+        if (typedef.matches("typedef\\s+\\w+\\s+\\w+\\s*\\([^)]*\\)\\s*;")) {
+            return;
+        }
+        
+        // Handle typedef struct
+        if (typedef.startsWith("typedef struct")) {
+            // Pattern: typedef struct Name { ... } TypeName;
+            if (typedef.contains("}")) {
+                String[] parts = typedef.split("\\}");
+                if (parts.length > 1) {
+                    String typeName = parts[1].trim().replaceAll(";", "").trim();
+                    if (!typeName.isEmpty() && !typeName.contains("(")) {
+                        types.add(typeName);
+                    }
+                }
+            }
+            return;
+        }
+        
+        // Handle simple typedef: typedef int Distance;
+        if (typedef.endsWith(";")) {
+            // Remove typedef and semicolon
+            String content = typedef.substring(7).trim(); // Remove "typedef"
+            content = content.substring(0, content.length() - 1).trim(); // Remove ";"
+            String[] parts = content.split("\\s+");
+            if (parts.length >= 2) {
+                String typeName = parts[parts.length - 1];
+                if (!typeName.isEmpty() && !typeName.contains("(") && !typeName.contains("{")) {
+                    types.add(typeName);
+                }
+            }
+        }
     }
     
     private static String getRiskLevel(int complexity) {

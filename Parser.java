@@ -12,6 +12,12 @@ public class Parser
         this.typedefNames = new HashSet<>();
     }
 
+    public Parser(List<Token> tokens, Set<String> externalTypes) 
+    {
+        this.tokens = tokens;
+        this.typedefNames = new HashSet<>(externalTypes);
+    }
+
     private List<String> FuncsList;
 
     public List<String> getFuncs()
@@ -98,6 +104,13 @@ public class Parser
     // --- Declarations ---
 
      private List<ASTNode> parseDeclaration() {
+        // Handle storage class specifiers (static, extern, etc.)
+        boolean isStatic = false;
+        if (check("STATIC")) {
+            isStatic = true;
+            advance(); // consume 'static'
+        }
+        
         // 1. Typedef
         if (check("TYPEDEF")) {
             advance(); // consume 'typedef'
