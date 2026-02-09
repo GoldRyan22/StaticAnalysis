@@ -26,6 +26,7 @@ class KW_List
       kwList.add("inline");
       kwList.add("int");
       kwList.add("long");
+      kwList.add("NULL");
       kwList.add("register");
       kwList.add("restrict");
       kwList.add("return");

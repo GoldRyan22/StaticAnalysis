@@ -486,7 +486,20 @@ public class SemanticAnalyzer {
         
         // Allow implicit conversions
         if (resolvedExpected.equals("double") && resolvedActual.equals("int")) return true;
+        if (resolvedExpected.equals("double") && resolvedActual.equals("float")) return true;
+        if (resolvedExpected.equals("float") && resolvedActual.equals("int")) return true;
+
         if (resolvedExpected.equals("int") && resolvedActual.equals("char")) return true;
+        if (resolvedExpected.equals("unsigned") && resolvedActual.equals("int")) return true;
+
+        if (resolvedExpected.equals("unsigned long") && resolvedActual.equals("int")) return true;
+        if (resolvedExpected.equals("unsigned long") && resolvedActual.equals("unsigned")) return true;
+
+        if (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("int")) return true;
+        if (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("unsigned")) return true;
+        if (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("unsigned long")) return true;
+        
+        
         
         // Pointer compatibility
         if (resolvedExpected.contains("*") && resolvedActual.contains("*")) {

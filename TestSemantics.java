@@ -4,7 +4,7 @@ public class TestSemantics
 {
     public static void main(String[] args) 
     {
-        String filename = args.length > 0 ? args[0] : "test_pointers.c";
+        String filename = args.length > 0 ? args[0] : "redis/src/adlist.c";
         
         LexAn lex = new LexAn();
         List<Token> tokens = lex.LexicalAnalysis(filename);

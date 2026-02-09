@@ -86,7 +86,7 @@ public class Parser
     
     private boolean checkTypeStart() 
     {
-        if (check("INT") || check("DOUBLE") || check("CHAR") || check("VOID") || check("STRUCT")) {
+        if (check("UNSIGNED") || check("INT") || check("DOUBLE") || check("FLOAT") || check("CHAR") || check("VOID") || check("STRUCT")) {
             return true;
         }
         // Check for custom typedef names
@@ -270,8 +270,18 @@ public class Parser
         String baseType;
         
         if (match("INT")) baseType = "int";
+        else if (match("UNSIGNED")) 
+            {
+                baseType = "unsigned";
+                if (match("LONG")) {
+                    baseType += " long";
+                    if (match("LONG")) {
+                        baseType += " long";
+                    }
+                }
+            }
         else if (match("DOUBLE")) baseType = "double";
-        else if (match("CHAR")) baseType = "char";
+        else if (match("FLOAT")) baseType = "float";
         else if (match("VOID")) baseType = "void";
         else if (match("STRUCT")) 
         {
@@ -306,6 +316,11 @@ public class Parser
         if (match("RETURN")) return parseReturn();
         if (match("BREAK")) { consume("SEMICOLON", "Expect ;"); return new LiteralNode("BREAK", "break"); }
         if (check("LACC")) return parseBlock();
+        
+        // Handle empty statement (just a semicolon)
+        if (match("SEMICOLON")) {
+            return new LiteralNode("EMPTY", "");
+        }
         
         ASTNode expr = parseExpression();
         consume("SEMICOLON", "Expect ; after expression");
@@ -574,7 +589,7 @@ public class Parser
             return expr;
         }
         
-        if (check("CT_INT") || check("CT_REAL") || check("CT_CHAR") || check("CT_STRING")) 
+        if (check("CT_INT") || check("CT_REAL") || check("CT_CHAR") || check("CT_STRING") || check("HEX") || check("OCT") || check("FLOAT") || check("NULL")) 
         {
             Token t = advance();
             return new LiteralNode(t.code, t.value);
