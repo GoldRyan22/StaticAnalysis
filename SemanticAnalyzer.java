@@ -26,6 +26,7 @@ public class SemanticAnalyzer {
     private List<SemanticError> warnings;
     private String currentFunction;
     private Map<String, StructDeclNode> structDefinitions;
+    private StandardLibrary standardLibrary;
     
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
@@ -34,9 +35,14 @@ public class SemanticAnalyzer {
         this.warnings = new ArrayList<>();
         this.currentFunction = null;
         this.structDefinitions = new HashMap<>();
+        this.standardLibrary = new StandardLibrary();
     }
     
     public void analyze(ProgramNode program) {
+        // Pre-pass: scan for standard library usage and register only used symbols
+        standardLibrary.scanForUsedSymbols(program);
+        standardLibrary.registerUsedSymbols(symbolTable);
+        
         // First pass: collect all declarations (functions, typedefs, global vars, structs)
         for (ASTNode node : program.declarations) {
             if (node instanceof StructDeclNode) {
@@ -483,6 +489,8 @@ public class SemanticAnalyzer {
         String resolvedActual = resolveTypedef(actual);
         
         if (resolvedExpected.equals(resolvedActual)) return true;
+
+        if (resolvedExpected.equals("...")) return true;  // Variadic functions can accept any type
         
         // Allow implicit conversions
         if (resolvedExpected.equals("double") && resolvedActual.equals("int")) return true;
@@ -554,6 +562,7 @@ public class SemanticAnalyzer {
     public void printResults() {
         symbolTable.print();
         aliasTable.print();
+        standardLibrary.printUsedSymbols();
         
         if (!errors.isEmpty() || !warnings.isEmpty()) {
             System.out.println("\n=== Semantic Analysis Results ===");

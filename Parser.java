@@ -269,17 +269,33 @@ public class Parser
     {
         String baseType;
         
-        if (match("INT")) baseType = "int";
+        if (match("INT")) 
+        {
+            baseType = "int";
+            if (match("SHORT")) baseType = "short";
+            else if (match("LONG")) {
+                baseType = "long";
+                if (match("LONG")) {
+                    baseType = "long long";
+                }
+            }
+
+        }
         else if (match("UNSIGNED")) 
+        {
+            baseType = "unsigned";
+            if(match("short")) baseType += " short";
+            else
             {
-                baseType = "unsigned";
                 if (match("LONG")) {
                     baseType += " long";
                     if (match("LONG")) {
                         baseType += " long";
                     }
                 }
-            }
+            }    
+        }
+        else if (match("CHAR")) baseType = "char";
         else if (match("DOUBLE")) baseType = "double";
         else if (match("FLOAT")) baseType = "float";
         else if (match("VOID")) baseType = "void";

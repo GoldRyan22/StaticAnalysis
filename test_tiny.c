@@ -30,9 +30,26 @@ typedef struct empty{} emp;
 
 emp e1;
 
+int strlen(char* s) { return 0; }
+
+
+
+void* malloc(int size) { return 0; }
+void free(void* ptr) { }
+char* strcpy(char* dest, char* src) { return dest; }
+int rand() { return 42; }
+void srand(int seed) { }
+void* memset(void* ptr, int value, int num) { return ptr; }
+void* malloc(int size) { return 0; }
+
 int main() {
 
     void* vp;
+
+    void *vp2;
+
+    printf("test: %d\n", test());
+    fopen("test.txt", "w");
     
 
     if (pptr == NULL);
