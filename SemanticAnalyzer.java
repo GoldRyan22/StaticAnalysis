@@ -27,6 +27,7 @@ public class SemanticAnalyzer {
     private String currentFunction;
     private Map<String, StructDeclNode> structDefinitions;
     private StandardLibrary standardLibrary;
+    private CustomLibraryResolver customResolver;
     
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
@@ -36,12 +37,24 @@ public class SemanticAnalyzer {
         this.currentFunction = null;
         this.structDefinitions = new HashMap<>();
         this.standardLibrary = new StandardLibrary();
+        this.customResolver = null;
+    }
+    
+    public void setCustomLibraryResolver(CustomLibraryResolver resolver) {
+        this.customResolver = resolver;
     }
     
     public void analyze(ProgramNode program) {
         // Pre-pass: scan for standard library usage and register only used symbols
         standardLibrary.scanForUsedSymbols(program);
         standardLibrary.registerUsedSymbols(symbolTable);
+        
+        // Pre-pass: register custom library symbols (from parsed headers)
+        if (customResolver != null) {
+            customResolver.scanForUsedSymbols(program);
+            customResolver.registerUsedSymbols(symbolTable);
+            customResolver.registerConstants(symbolTable);
+        }
         
         // First pass: collect all declarations (functions, typedefs, global vars, structs)
         for (ASTNode node : program.declarations) {
@@ -77,11 +90,8 @@ public class SemanticAnalyzer {
     }
     
     private void analyzeFunctionDeclaration(FuncDeclNode node) {
-        // Check for duplicate function declaration
-        if (symbolTable.lookupInCurrentScope(node.name) != null) {
-            addError("Function '" + node.name + "' already declared");
-            return;
-        }
+        // Allow re-declaration/definition of functions (valid in C: header decl + source defn)
+        // If already declared, just overwrite the symbol entry (no error)
         
         Symbol funcSymbol = new Symbol(node.name, node.retType, "function", 0);
         funcSymbol.returnType = node.retType;
@@ -189,7 +199,9 @@ public class SemanticAnalyzer {
             IfStmtNode ifStmt = (IfStmtNode) node;
             
             String condType = inferType(ifStmt.condition);
-            if (!condType.equals("int") && !condType.equals("bool")) {
+            // In C, any pointer/integer type is a valid condition (if (ptr) is legal)
+            if (!condType.equals("int") && !condType.equals("bool")
+                    && !condType.contains("*") && !condType.equals("unknown")) {
                 addWarning("Condition should be boolean or integer type, got: " + condType);
             }
             
@@ -207,7 +219,8 @@ public class SemanticAnalyzer {
             WhileStmtNode whileStmt = (WhileStmtNode) node;
             
             String condType = inferType(whileStmt.condition);
-            if (!condType.equals("int") && !condType.equals("bool")) {
+            // In C, any pointer/integer/numeric type is a valid loop condition
+            if (!isNumericOrPointerType(condType)) {
                 addWarning("Loop condition should be boolean or integer type, got: " + condType);
             }
             
@@ -313,6 +326,15 @@ public class SemanticAnalyzer {
     }
     
     private void analyzeFunctionCall(FuncCallNode node) {
+        // Function pointer calls have compound names like "(list -> free)" or "(copy -> dup)"
+        // These are indirect calls through struct members - skip declaration lookup
+        if (node.name.contains("->") || node.name.contains(".") || node.name.startsWith("(")) {
+            for (ASTNode arg : node.args) {
+                inferType(arg);
+            }
+            return;
+        }
+        
         Symbol funcSymbol = symbolTable.lookup(node.name);
         
         if (funcSymbol == null) {
@@ -325,15 +347,28 @@ public class SemanticAnalyzer {
             return;
         }
         
+        // Determine whether this is a variadic function ("..." as last param)
+        boolean isVariadic = !funcSymbol.paramTypes.isEmpty() &&
+                funcSymbol.paramTypes.get(funcSymbol.paramTypes.size() - 1).equals("...");
+        // Also treat a sole "..." param as pure-variadic (e.g. sizeof)
+        boolean isPureVariadic = funcSymbol.paramTypes.size() == 1 &&
+                funcSymbol.paramTypes.get(0).equals("...");
+        int requiredArgs = isVariadic ? funcSymbol.paramTypes.size() - 1 : funcSymbol.paramTypes.size();
+        
         // Check argument count
-        if (node.args.size() != funcSymbol.paramTypes.size()) {
+        if (!isVariadic && node.args.size() != funcSymbol.paramTypes.size()) {
             addError("Function '" + node.name + "' expects " + funcSymbol.paramTypes.size() + 
                     " arguments but got " + node.args.size());
             return;
         }
+        if (isVariadic && !isPureVariadic && node.args.size() < requiredArgs) {
+            addError("Function '" + node.name + "' expects at least " + requiredArgs + 
+                    " arguments but got " + node.args.size());
+            return;
+        }
         
-        // Check argument types
-        for (int i = 0; i < node.args.size(); i++) {
+        // Check argument types for the fixed (non-variadic) parameters
+        for (int i = 0; i < Math.min(node.args.size(), requiredArgs); i++) {
             String argType = inferType(node.args.get(i));
             String paramType = funcSymbol.paramTypes.get(i);
             
@@ -422,6 +457,10 @@ public class SemanticAnalyzer {
             }
             return "unknown";
         }
+        else if (node instanceof CastExprNode) {
+            // A C-style cast: the type of the expression is the cast-to type
+            return ((CastExprNode) node).castType;
+        }
         
         return "unknown";
     }
@@ -437,14 +476,22 @@ public class SemanticAnalyzer {
         }
         String memberName = ((IdNode) node.right).name;
         
+        // If left type is unknown (e.g. unresolved struct), propagate unknown silently
+        if (leftType.equals("unknown")) {
+            return "unknown";
+        }
+        
+        // Resolve typedef so e.g. "list*" becomes "struct list*" before checking pointer
+        String resolvedLeft = resolveTypedef(leftType);
+        
         // Left should be a pointer to struct
-        if (!leftType.contains("*")) {
+        if (!resolvedLeft.contains("*") && !leftType.contains("*")) {
             addError("Left side of -> must be a pointer");
             return "unknown";
         }
         
         // Remove pointer to get base struct type
-        String baseType = leftType.replaceFirst("\\*", "").trim();
+        String baseType = resolvedLeft.replaceFirst("\\*", "").trim();
         
         return getMemberType(baseType, memberName);
     }
@@ -467,26 +514,55 @@ public class SemanticAnalyzer {
         // Extract struct name from "struct StructName" format
         String structName = structType.replaceFirst("^struct\\s+", "").trim();
         
+        // Check AST-parsed struct definitions (from the source file itself)
         StructDeclNode structDef = structDefinitions.get(structName);
-        if (structDef == null) {
+        if (structDef != null) {
+            for (VarDeclNode field : structDef.fields) {
+                if (field.name.equals(memberName)) {
+                    return field.type;
+                }
+            }
+            addError("Struct '" + structName + "' has no member named '" + memberName + "'");
             return "unknown";
         }
         
-        // Find the member in struct fields
-        for (VarDeclNode field : structDef.fields) {
-            if (field.name.equals(memberName)) {
-                return field.type;
+        // Check custom library resolver structs (from parsed header files)
+        if (customResolver != null) {
+            CustomLibraryResolver.CustomStruct customStruct = customResolver.getStruct(structName);
+            if (customStruct != null) {
+                String fieldType = customStruct.getFieldType(memberName);
+                if (fieldType != null) {
+                    return fieldType;
+                }
+                addError("Struct '" + structName + "' has no member named '" + memberName + "'");
+                return "unknown";
             }
         }
         
-        addError("Struct '" + structName + "' has no member named '" + memberName + "'");
+        // Struct definition not found in any source - can't resolve member type
         return "unknown";
     }
     
+    /** Returns true when type is an integer/pointer type valid as a C condition */
+    private boolean isNumericOrPointerType(String type) {
+        if (type == null) return true;
+        if (type.equals("unknown")) return true;
+        if (type.contains("*")) return true;
+        String r = resolveTypedef(type).toLowerCase();
+        return r.contains("int") || r.contains("long") || r.contains("short")
+            || r.contains("char") || r.contains("unsigned") || r.contains("size_t")
+            || r.contains("bool") || r.contains("float") || r.contains("double");
+    }
+
     private boolean isTypeCompatible(String expected, String actual) {
         // Resolve typedefs
         String resolvedExpected = resolveTypedef(expected);
         String resolvedActual = resolveTypedef(actual);
+        
+        // Normalize: strip leading "struct " for comparison
+        String normExpected = resolvedExpected.replaceAll("^struct\\s+", "").replaceAll("\\*", "*").trim();
+        String normActual   = resolvedActual  .replaceAll("^struct\\s+", "").replaceAll("\\*", "*").trim();
+        if (normExpected.equals(normActual)) return true;
         
         if (resolvedExpected.equals(resolvedActual)) return true;
 
@@ -499,6 +575,13 @@ public class SemanticAnalyzer {
 
         if (resolvedExpected.equals("int") && resolvedActual.equals("char")) return true;
         if (resolvedExpected.equals("unsigned") && resolvedActual.equals("int")) return true;
+
+        // Numeric widening: long/unsigned long are compatible with int
+        if (resolvedExpected.equals("long") && resolvedActual.equals("int")) return true;
+        if (resolvedExpected.equals("long") && resolvedActual.equals("long")) return true;
+        if (resolvedExpected.equals("int") && resolvedActual.equals("long")) return true;
+        if (resolvedExpected.equals("long long") && resolvedActual.equals("long")) return true;
+        if (resolvedExpected.equals("long long") && resolvedActual.equals("int")) return true;
 
         if (resolvedExpected.equals("unsigned long") && resolvedActual.equals("int")) return true;
         if (resolvedExpected.equals("unsigned long") && resolvedActual.equals("unsigned")) return true;
@@ -517,27 +600,36 @@ public class SemanticAnalyzer {
             }
         }
         
+        // Allow integer literal 0 (NULL) to be assigned/returned to any pointer type
+        if (resolvedExpected.contains("*") && resolvedActual.equals("int")) return true;
+        
+        // Allow "unknown" on either side - don't report spurious type mismatches
+        // when struct field types could not be resolved
+        if (resolvedActual.equals("unknown") || resolvedExpected.equals("unknown")) return true;
+        
         return false;
     }
     
     private String resolveTypedef(String type) {
         // Keep resolving until we reach a base type
+        // Uses lookupTypedef() instead of lookup() to avoid local variables shadowing typedefs
+        // (e.g. a local variable named "list" should not shadow the typedef "list")
         String resolved = type;
         int maxDepth = 10; // Prevent infinite loops
         int depth = 0;
         
         while (depth < maxDepth) {
-            Symbol symbol = symbolTable.lookup(resolved.replace("*", "").trim());
-            if (symbol != null && symbol.kind.equals("typedef")) {
-                // Extract pointer level from original type
-                int ptrLevel = 0;
-                for (char c : type.toCharArray()) {
-                    if (c == '*') ptrLevel++;
-                }
-                
-                // Replace base type, keep pointers
-                String pointers = "*".repeat(ptrLevel);
-                resolved = symbol.type + pointers;
+            // Split resolved type into base-name part and pointer suffix
+            int ptrIdx = resolved.indexOf('*');
+            String basePart = (ptrIdx >= 0 ? resolved.substring(0, ptrIdx) : resolved).trim();
+            String ptrSuffix = (ptrIdx >= 0 ? resolved.substring(ptrIdx) : "");
+            
+            // Remove "struct" keyword before looking up
+            String lookupKey = basePart.replaceFirst("^struct\\s+", "").trim();
+            
+            Symbol symbol = symbolTable.lookupTypedef(lookupKey);
+            if (symbol != null) {
+                resolved = symbol.type + ptrSuffix;
                 depth++;
             } else {
                 break;
@@ -563,6 +655,9 @@ public class SemanticAnalyzer {
         symbolTable.print();
         aliasTable.print();
         standardLibrary.printUsedSymbols();
+        if (customResolver != null) {
+            customResolver.printUsedSymbols();
+        }
         
         if (!errors.isEmpty() || !warnings.isEmpty()) {
             System.out.println("\n=== Semantic Analysis Results ===");

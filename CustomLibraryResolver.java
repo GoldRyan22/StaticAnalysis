@@ -13,6 +13,7 @@ public class CustomLibraryResolver {
     private Map<String, CustomFunction> functions;
     private Map<String, String> typedefs;
     private Map<String, CustomStruct> structs;
+    private Map<String, Integer> defineConstants;
     private Set<String> usedFunctions;
     private Set<String> usedTypes;
     private Set<String> processedHeaders;
@@ -22,6 +23,7 @@ public class CustomLibraryResolver {
         this.functions = new HashMap<>();
         this.typedefs = new HashMap<>();
         this.structs = new HashMap<>();
+        this.defineConstants = new HashMap<>();
         this.usedFunctions = new HashSet<>();
         this.usedTypes = new HashSet<>();
         this.processedHeaders = new HashSet<>();
@@ -86,6 +88,9 @@ public class CustomLibraryResolver {
             // Extract function declarations
             extractFunctionDeclarations(content);
             
+            // Extract #define integer constants (e.g. AL_START_HEAD, AL_START_TAIL)
+            extractDefines(content);
+            
         } catch (IOException e) {
             System.err.println("Error reading header file: " + headerPath + " - " + e.getMessage());
         }
@@ -111,6 +116,38 @@ public class CustomLibraryResolver {
         }
         
         return null;
+    }
+    
+    /**
+     * Extract simple integer #define constants.
+     * Pattern: #define NAME integer_value
+     */
+    private void extractDefines(String content) {
+        // Re-add comments strip per line for #define (removeComments was already called but
+        // the original content passed here has comments stripped already)
+        Pattern definePattern = Pattern.compile(
+            "^#define\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(\\d+)\\s*$",
+            Pattern.MULTILINE
+        );
+        Matcher matcher = definePattern.matcher(content);
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            int value = Integer.parseInt(matcher.group(2));
+            defineConstants.put(name, value);
+            System.out.println("  Found #define constant: " + name + " = " + value);
+        }
+    }
+    
+    /**
+     * Register all known #define integer constants into the symbol table as int variables.
+     */
+    public void registerConstants(SymbolTable symbolTable) {
+        for (String name : defineConstants.keySet()) {
+            // Only register if not already present
+            if (symbolTable.lookup(name) == null) {
+                symbolTable.addSymbol(name, "int", "variable");
+            }
+        }
     }
     
     /**
@@ -399,6 +436,11 @@ public class CustomLibraryResolver {
             for (ASTNode arg : funcCall.args) {
                 scanNode(arg);
             }
+        }
+        else if (node instanceof CastExprNode) {
+            CastExprNode cast = (CastExprNode) node;
+            scanType(cast.castType);
+            scanNode(cast.expr);
         }
         else if (node instanceof TypedefDeclNode) {
             TypedefDeclNode typedef = (TypedefDeclNode) node;

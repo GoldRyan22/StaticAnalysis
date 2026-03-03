@@ -24,10 +24,25 @@ public class Main
         
         try 
         {
-            // Extract external types from preprocessed file
+            // Extract external types from preprocessed file (old-style preprocessed files)
             Set<String> externalTypes = extractTypesFromFile(filename);
             if (!externalTypes.isEmpty()) {
                 System.out.println("Found " + externalTypes.size() + " external type(s): " + externalTypes);
+            }
+            
+            // ---- Custom Library Resolver: parse headers referenced in the source ----
+            String sourceDir = new java.io.File(filename).getParent();
+            if (sourceDir == null) sourceDir = ".";
+            CustomLibraryResolver customResolver = new CustomLibraryResolver(sourceDir);
+            List<String> customIncludes = customResolver.extractCustomIncludes(filename);
+            for (String header : customIncludes) {
+                customResolver.parseHeaderFile(header);
+            }
+            // Add typedef/struct names discovered in headers so the parser treats them as types
+            externalTypes.addAll(customResolver.getTypedefNames());
+            externalTypes.addAll(customResolver.getStructNames());
+            if (!externalTypes.isEmpty()) {
+                System.out.println("Known types (incl. headers): " + externalTypes);
             }
             
             // Lexical Analysis
@@ -57,6 +72,7 @@ public class Main
                 System.out.println("=".repeat(60));
                 
                 SemanticAnalyzer analyzer = new SemanticAnalyzer();
+                analyzer.setCustomLibraryResolver(customResolver);
                 analyzer.analyze(tree);
                 analyzer.printResults();
                 

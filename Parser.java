@@ -86,7 +86,7 @@ public class Parser
     
     private boolean checkTypeStart() 
     {
-        if (check("UNSIGNED") || check("INT") || check("DOUBLE") || check("FLOAT") || check("CHAR") || check("VOID") || check("STRUCT")) {
+        if (check("UNSIGNED") || check("INT") || check("DOUBLE") || check("FLOAT") || check("CHAR") || check("VOID") || check("LONG") || check("STRUCT")) {
             return true;
         }
         // Check for custom typedef names
@@ -223,6 +223,10 @@ public class Parser
         if (!check("RPAR")) {
             do {
                 String argType = parseType();
+                // Handle (void) as empty parameter list (C convention)
+                if (argType.equals("void") && check("RPAR")) {
+                    break;
+                }
                 String argName = consume("ID", "Expect argument name").value.toString();
                 args.add(new VarDeclNode(argType, argName, null));
             } while (match("COMMA"));
@@ -238,9 +242,19 @@ public class Parser
         
         vars.add(parseOneVar(type, firstName));
 
+        // Strip pointer stars from type to get the base type for comma-separated declarations.
+        // e.g. "listNode*" → "listNode" so that "*next" correctly uses "listNode" + "*" = "listNode*"
+        String baseTypeOnly = type.replaceAll("\\*+$", "").trim();
+
         while (match("COMMA")) {
+            // Consume any pointer stars before the identifier,
+            // e.g. "listNode *current, *next;" — the second name starts with '*'
+            String extraPtrs = "";
+            while (match("MUL")) {
+                extraPtrs += "*";
+            }
             Token nextId = consume("ID", "Expect variable name after comma");
-            vars.add(parseOneVar(type, nextId.value.toString()));
+            vars.add(parseOneVar(baseTypeOnly + extraPtrs, nextId.value.toString()));
         }
 
         consume("SEMICOLON", "Expect ; after variable declaration");
@@ -299,6 +313,10 @@ public class Parser
         else if (match("DOUBLE")) baseType = "double";
         else if (match("FLOAT")) baseType = "float";
         else if (match("VOID")) baseType = "void";
+        else if (match("LONG")) {
+            baseType = "long";
+            if (match("LONG")) baseType = "long long";
+        }
         else if (match("STRUCT")) 
         {
             Token t = consume("ID", "Expect struct name");
@@ -441,6 +459,20 @@ public class Parser
             ASTNode value = parseAssignment();
             return new BinaryExprNode(expr, "=", value);
         }
+        // Handle compound assignments: +=, -=, *=, /=, &=, |=
+        // The lexer produces two tokens (e.g. ADDFinal then ASSIGN), so peek ahead
+        String[] compoundOps = {"ADDFinal", "ADD", "SUBFinal", "SUB", "MUL", "DIV", "BITAND", "BITOR"};
+        String[] opSymbols   = {"+",        "+",   "-",        "-",   "*",   "/",   "&",      "|"};
+        for (int i = 0; i < compoundOps.length; i++) {
+            if (check(compoundOps[i]) && current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN")) {
+                String op = opSymbols[i];
+                advance(); // consume OP token
+                advance(); // consume ASSIGN token
+                ASTNode value = parseAssignment();
+                // desugar: expr OP= value  →  expr = expr OP value
+                return new BinaryExprNode(expr, "=", new BinaryExprNode(expr, op, value));
+            }
+        }
         return expr;
     }
 
@@ -498,7 +530,8 @@ public class Parser
     private ASTNode parseAddSub() 
     {
         ASTNode expr = parseTerm();
-        while (check("ADD") || check("ADDFinal") || check("SUB") || check("SUBFinal")) 
+        while ((check("ADD") || check("ADDFinal") || check("SUB") || check("SUBFinal"))
+               && !(current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN"))) 
         {
             Token opToken = advance();
             String op = (opToken.code.equals("ADD") || opToken.code.equals("ADDFinal")) ? "+" : "-";
@@ -511,7 +544,8 @@ public class Parser
     private ASTNode parseTerm() 
     {
         ASTNode expr = parseUnary();
-        while (check("MUL") || check("DIV")) 
+        while ((check("MUL") || check("DIV"))
+               && !(current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN"))) 
         {
             String op = advance().code.equals("MUL") ? "*" : "/";
             ASTNode right = parseUnary();
@@ -600,9 +634,38 @@ public class Parser
 
     private ASTNode parsePrimary() {
         if (match("LPAR")) {
+            // Check for C-style cast: (type) expr
+            // A cast starts with a type keyword or a known typedef name
+            if (isCastExpression()) {
+                String castType = parseType();
+                consume("RPAR", "Expect ')' after cast type");
+                ASTNode inner = parseUnary();
+                return new CastExprNode(castType, inner);
+            }
             ASTNode expr = parseExpression();
             consume("RPAR", "Expect ')' after expression.");
             return expr;
+        }
+        
+        // sizeof(expr) or sizeof(type) - registered in StandardLibrary as returning size_t
+        if (match("SIZEOF")) {
+            consume("LPAR", "Expect '(' after sizeof");
+            List<ASTNode> sizeofArgs = new ArrayList<>();
+            // If it starts with a type keyword or known typedef, skip tokens (type operand)
+            if (check("STRUCT") || check("INT") || check("CHAR") || check("VOID")
+                    || check("DOUBLE") || check("FLOAT") || check("UNSIGNED") || check("LONG")
+                    || (check("ID") && typedefNames.contains(peek().value.toString()))) {
+                // Consume all type tokens until closing paren
+                while (!check("RPAR") && !check("END")) {
+                    advance();
+                }
+            } else {
+                // Expression operand - parse it and pass as argument so type is available
+                sizeofArgs.add(parseExpression());
+            }
+            consume("RPAR", "Expect ')' after sizeof operand");
+            // Emit FuncCallNode so semantic analyzer resolves return type as size_t
+            return new FuncCallNode("sizeof", sizeofArgs);
         }
         
         if (check("CT_INT") || check("CT_REAL") || check("CT_CHAR") || check("CT_STRING") || check("HEX") || check("OCT") || check("FLOAT") || check("NULL")) 
@@ -619,5 +682,37 @@ public class Parser
         
         throw error(peek(), "Expect expression.");
     }
+    
+    /**
+     * Look ahead to determine if the current position (after consuming LPAR) is a C-style cast.
+     * A cast has the form: (type-keywords [*]*) followed by an expression token.
+     * We peek without consuming.
+     */
+    private boolean isCastExpression() {
+        // Save position
+        int saved = current;
+        try {
+            // Must start with a type keyword or typedef name
+            if (!check("INT") && !check("CHAR") && !check("VOID") && !check("DOUBLE")
+                    && !check("FLOAT") && !check("UNSIGNED") && !check("LONG")
+                    && !check("SHORT") && !check("SIGNED") && !check("STRUCT")
+                    && !(check("ID") && typedefNames.contains(peek().value.toString()))) {
+                return false;
+            }
+            // Skip type tokens
+            while (check("INT") || check("CHAR") || check("VOID") || check("DOUBLE")
+                    || check("FLOAT") || check("UNSIGNED") || check("LONG") || check("SHORT")
+                    || check("SIGNED") || check("STRUCT")
+                    || (check("ID") && typedefNames.contains(peek().value.toString()))) {
+                advance();
+            }
+            // Skip pointer stars
+            while (check("MUL")) advance();
+            // Must close with RPAR
+            if (!check("RPAR")) return false;
+            return true;
+        } finally {
+            current = saved;
+        }
+    }
 }
-

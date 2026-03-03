@@ -155,6 +155,7 @@ class AnalysisPanel(ctk.CTkFrame):
         self.configure(fg_color=COLORS["bg_dark"])
         
         self.selected_file = None
+        self.selected_folder = None
         self.output_dir = None
         self.file_items = []
         
@@ -234,15 +235,23 @@ class AnalysisPanel(ctk.CTkFrame):
                                          wraplength=280)
         self.output_label.pack(anchor="w", padx=10, pady=(0, 5))
         
-        # Analyze button
-        self.analyze_btn = ctk.CTkButton(self, text="▶  Run Analysis",
-                                         font=ctk.CTkFont(size=14, weight="bold"),
+        # Analyze buttons
+        self.analyze_btn = ctk.CTkButton(self, text="▶  Analyze Selected",
+                                         font=ctk.CTkFont(size=13, weight="bold"),
                                          fg_color=COLORS["success"],
                                          hover_color="#5AAC64",
-                                         height=40,
+                                         height=38,
                                          command=self.start_analysis)
-        self.analyze_btn.pack(fill="x", padx=5, pady=10)
-        
+        self.analyze_btn.pack(fill="x", padx=5, pady=(8, 2))
+
+        self.analyze_all_btn = ctk.CTkButton(self, text="▶▶  Analyze All Files in Folder",
+                                              font=ctk.CTkFont(size=13, weight="bold"),
+                                              fg_color=COLORS["accent"],
+                                              hover_color=COLORS["accent_hover"],
+                                              height=38,
+                                              command=self.start_folder_analysis)
+        self.analyze_all_btn.pack(fill="x", padx=5, pady=(2, 8))
+
         # Progress bar
         self.progress = ctk.CTkProgressBar(self, mode="indeterminate",
                                            progress_color=COLORS["accent"])
@@ -269,6 +278,7 @@ class AnalysisPanel(ctk.CTkFrame):
             self.output_label.configure(text=directory)
     
     def load_folder(self, folder):
+        self.selected_folder = folder
         # Clear existing items
         for item in self.file_items:
             item.destroy()
@@ -304,15 +314,25 @@ class AnalysisPanel(ctk.CTkFrame):
         self.selected_label.configure(text=os.path.basename(filepath))
         self.app.log_message(f"Selected: {filepath}")
     
+    def _disable_buttons(self):
+        self.analyze_btn.configure(state="disabled", text="Analyzing...")
+        self.analyze_all_btn.configure(state="disabled", text="Analyzing...")
+        self.progress.start()
+
     def start_analysis(self):
         if not self.selected_file:
             messagebox.showwarning("No File", "Please select a C file first")
             return
-        
-        self.analyze_btn.configure(state="disabled", text="Analyzing...")
-        self.progress.start()
-        
+        self._disable_buttons()
         thread = threading.Thread(target=self.run_analysis, daemon=True)
+        thread.start()
+
+    def start_folder_analysis(self):
+        if not self.selected_folder:
+            messagebox.showwarning("No Folder", "Please open a folder first")
+            return
+        self._disable_buttons()
+        thread = threading.Thread(target=self.run_folder_analysis, daemon=True)
         thread.start()
     
     def run_analysis(self):
@@ -425,9 +445,123 @@ class AnalysisPanel(ctk.CTkFrame):
             self.app.after(0, self.finish_analysis)
     
     def finish_analysis(self):
-        self.analyze_btn.configure(state="normal", text="▶  Run Analysis")
+        self.analyze_btn.configure(state="normal", text="▶  Analyze Selected")
+        self.analyze_all_btn.configure(state="normal", text="▶▶  Analyze All Files in Folder")
         self.progress.stop()
         self.progress.set(0)
+
+    def run_folder_analysis(self):
+        """Analyze every .c file in the selected folder."""
+        try:
+            c_files = sorted(Path(self.selected_folder).glob("*.c"))
+            if not c_files:
+                self.app.log_message("❌ No .c files found in the selected folder.")
+                return
+
+            if not self.output_dir:
+                self.output_dir = os.path.join(self.selected_folder, "analysis_results")
+            os.makedirs(self.output_dir, exist_ok=True)
+
+            self.app.log_message("\n" + "━" * 50)
+            self.app.log_message(f"🗂  Folder Analysis — {len(c_files)} file(s) found")
+            self.app.log_message(f"   Folder : {self.selected_folder}")
+            self.app.log_message(f"   Output : {self.output_dir}")
+            self.app.log_message("━" * 50)
+
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+
+            # Ensure Java is compiled once
+            self.app.log_message("\n🔨 Checking Java compilation...")
+            main_class = os.path.join(script_dir, "Main.class")
+            main_java  = os.path.join(script_dir, "Main.java")
+            if not os.path.exists(main_class) or \
+               os.path.getmtime(main_java) > os.path.getmtime(main_class):
+                result = subprocess.run(
+                    ['javac', '*.java'],
+                    capture_output=True, text=True, cwd=script_dir, shell=True
+                )
+                if result.returncode != 0:
+                    raise Exception(f"Compilation failed: {result.stderr}")
+                self.app.log_message("   ✓ Compiled")
+            else:
+                self.app.log_message("   ✓ Already compiled")
+
+            combined_sections = []
+            errors_total = warnings_total = 0
+            original_dir = os.getcwd()
+
+            for idx, c_file in enumerate(c_files, 1):
+                self.app.log_message(f"\n[{idx}/{len(c_files)}] 🔍 {c_file.name}")
+                try:
+                    os.chdir(script_dir)
+                    result = subprocess.run(
+                        ['java', 'Main', str(c_file), '--all'],
+                        capture_output=True, text=True, timeout=60
+                    )
+
+                    section = (
+                        f"{'═' * 60}\n"
+                        f"  FILE: {c_file.name}\n"
+                        f"{'═' * 60}\n"
+                        + (result.stdout or "(no output)\n")
+                        + "\n"
+                    )
+                    combined_sections.append(section)
+
+                    # Count summary numbers
+                    m = re.search(r'(\d+) error.*?(\d+) warning', result.stdout or '')
+                    if m:
+                        errors_total   += int(m.group(1))
+                        warnings_total += int(m.group(2))
+
+                    # Move CFG files, prefixed with the source file stem
+                    stem = c_file.stem
+                    moved = 0
+                    for pattern in ['cfg_*.dot', 'cfg_*.png']:
+                        for f in glob.glob(pattern):
+                            basename = os.path.basename(f)
+                            dest = os.path.join(self.output_dir, f"{stem}__{basename}")
+                            os.rename(f, dest)
+                            moved += 1
+
+                    self.app.log_message(f"   ✓ Done ({moved} CFG file(s) saved)")
+
+                except subprocess.TimeoutExpired:
+                    combined_sections.append(f"FILE: {c_file.name}\n❌ Timed out\n\n")
+                    self.app.log_message(f"   ⚠ Timed out")
+                except Exception as e:
+                    combined_sections.append(f"FILE: {c_file.name}\n❌ Error: {e}\n\n")
+                    self.app.log_message(f"   ❌ Error: {e}")
+                finally:
+                    os.chdir(original_dir)
+
+            # Write combined report
+            header = (
+                f"FOLDER ANALYSIS REPORT\n"
+                f"Generated : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Folder    : {self.selected_folder}\n"
+                f"Files     : {len(c_files)}\n"
+                f"Total errors: {errors_total}   warnings: {warnings_total}\n"
+                + "━" * 60 + "\n\n"
+            )
+            report_file = os.path.join(self.output_dir, 'analysis_report.txt')
+            with open(report_file, 'w') as fh:
+                fh.write(header)
+                fh.writelines(combined_sections)
+
+            self.app.log_message("\n" + "━" * 50)
+            self.app.log_message(f"✅ FOLDER ANALYSIS COMPLETE")
+            self.app.log_message(f"   {len(c_files)} file(s) · {errors_total} error(s) · {warnings_total} warning(s)")
+            self.app.log_message("━" * 50)
+
+            self.app.after(100, lambda: self.app.results_panel.load_results(self.output_dir))
+
+        except Exception as e:
+            self.app.log_message(f"\n❌ Error: {str(e)}")
+            import traceback
+            self.app.log_message(traceback.format_exc())
+        finally:
+            self.app.after(0, self.finish_analysis)
 
 
 class ResultsPanel(ctk.CTkFrame):
@@ -684,15 +818,24 @@ class ResultsPanel(ctk.CTkFrame):
         else:
             self.report_text.insert("1.0", "No analysis_report.txt found in this directory.")
         
-        # Load CFG images
-        png_files = sorted(Path(directory).glob("cfg_*.png"))
+        # Load CFG images — support both single-file (cfg_func.png)
+        # and folder-analysis (stem__cfg_func.png) naming conventions
+        single_pngs = sorted(Path(directory).glob("cfg_*.png"))
+        folder_pngs = sorted(Path(directory).glob("*__cfg_*.png"))
+        png_files = folder_pngs if folder_pngs else single_pngs
         
         if png_files:
             self.cfg_label.configure(text=f"📋 Functions ({len(png_files)})")
             
             for png_path in png_files:
-                match = re.match(r'cfg_(.+)\.png', png_path.name)
-                func_name = match.group(1) if match else png_path.stem
+                # Folder-analysis prefix:  stem__cfg_funcname.png
+                m_folder = re.match(r'(.+?)__cfg_(.+)\.png', png_path.name)
+                if m_folder:
+                    func_name = f"{m_folder.group(1)}: {m_folder.group(2)}"
+                else:
+                    # Single-file:  cfg_funcname.png
+                    m_single = re.match(r'cfg_(.+)\.png', png_path.name)
+                    func_name = m_single.group(1) if m_single else png_path.stem
                 
                 item = CFGListItem(self.cfg_gallery, str(png_path), func_name,
                                    self.on_cfg_item_click)

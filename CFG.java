@@ -48,7 +48,7 @@ class ControlFlowGraph {
     public ControlFlowGraph(String functionName) {
         this.functionName = functionName;
         this.allNodes = new ArrayList<>();
-        this.entry = new CFGNode("ENTRY");
+        this.entry = new CFGNode("ENTRY\\n" + functionName);
         this.exit = new CFGNode("EXIT");
         allNodes.add(entry);
         allNodes.add(exit);

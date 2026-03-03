@@ -313,3 +313,20 @@ class FuncCallNode extends ASTNode
         return name + "(" + args.stream().map(a -> a.toString(0)).collect(Collectors.joining(", ")) + ")";
     }
 }
+
+/** C-style cast expression: (type) expr */
+class CastExprNode extends ASTNode
+{
+    String castType;
+    ASTNode expr;
+
+    public CastExprNode(String castType, ASTNode expr) {
+        this.castType = castType;
+        this.expr = expr;
+    }
+
+    @Override
+    public String toString(int indent) {
+        return "((" + castType + ")" + expr.toString(0) + ")";
+    }
+}

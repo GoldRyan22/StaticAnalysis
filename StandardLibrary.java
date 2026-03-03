@@ -93,6 +93,10 @@ public class StandardLibrary {
         addTypedef("errno_t", "int");
         addTypedef("rsize_t", "unsigned long");
         
+        // Built-in C operators registered as functions for semantic analysis
+        // sizeof(expr) and sizeof(type) both return size_t
+        addFunction("sizeof", "size_t", "...");
+        
         // stdlib.h
         addFunction("malloc", "void*", "size_t");
         addFunction("calloc", "void*", "size_t", "size_t");

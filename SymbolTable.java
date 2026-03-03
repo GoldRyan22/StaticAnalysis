@@ -128,6 +128,22 @@ class SymbolTable {
         return currentScope.hasSymbol(name) ? currentScope.symbols.get(name) : null;
     }
     
+    /**
+     * Look up a symbol specifically by kind="typedef", walking the scope chain
+     * but skipping non-typedef symbols with the same name. This avoids the
+     * situation where a local variable named "list" shadows the typedef "list".
+     */
+    public Symbol lookupTypedef(String name) {
+        Scope scope = currentScope;
+        while (scope != null) {
+            if (scope.symbols.containsKey(name) && scope.symbols.get(name).kind.equals("typedef")) {
+                return scope.symbols.get(name);
+            }
+            scope = scope.parent;
+        }
+        return null;
+    }
+    
     public boolean isDeclared(String name) {
         return lookup(name) != null;
     }
