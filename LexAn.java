@@ -150,6 +150,18 @@ class State0 extends States
         {
             newState = new PreprocessorBurnState();
         }
+        else if(currentChar == ':')
+        {
+            newState = new COLONState();
+        }
+        else if(currentChar == '?')
+        {
+            newState = new QUESTIONState();
+        }
+        else if(currentChar == '%')
+        {
+            newState = new MODState();
+        }
         else
         {
             // Default: skip unknown characters
@@ -726,6 +738,12 @@ class COMMAState extends FinalState{}
 
 class SEMICOLONState extends FinalState{}
 
+class COLONState extends FinalState{}
+
+class QUESTIONState extends FinalState{}
+
+class MODState extends FinalState{}
+
 class LPARState extends FinalState{}
 
 class RPARState extends FinalState{}
@@ -888,6 +906,7 @@ public class LexAn
                 if(TheState instanceof State0) TokenValue = "";
 
                 TheState = TheState.HandleState(currentChar);
+                if(TheState == null) { TheState = new State0(); TokenValue = ""; continue; }
 
                 if(TheState.finalState)
                 {

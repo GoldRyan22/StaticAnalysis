@@ -346,6 +346,22 @@ public class StandardLibrary {
         addTypedef("gid_t", "unsigned");
         addTypedef("off_t", "long");
         addTypedef("useconds_t", "unsigned");
+        addTypedef("nfds_t", "unsigned long");
+        addTypedef("suseconds_t", "long");
+        addTypedef("rlim_t", "unsigned long");
+        addTypedef("sigset_t", "unsigned long");
+        addTypedef("mode_t", "unsigned int");
+        addTypedef("dev_t", "unsigned long");
+        addTypedef("ino_t", "unsigned long");
+        addTypedef("nlink_t", "unsigned long");
+        addTypedef("blksize_t", "long");
+        addTypedef("blkcnt_t", "long");
+        // socket/network types
+        addTypedef("socklen_t", "unsigned int");
+        addTypedef("sa_family_t", "unsigned short");
+        addTypedef("in_addr_t", "unsigned int");
+        addTypedef("in_port_t", "unsigned short");
+        addTypedef("nfds_t", "unsigned long");
         
         // pthread.h
         addFunction("pthread_create", "int", "pthread_t*", "pthread_attr_t*", "void*", "void*");
@@ -622,6 +638,10 @@ public class StandardLibrary {
     
     public boolean isStandardType(String name) {
         return typedefs.containsKey(name);
+    }
+
+    public Set<String> getTypedefNames() {
+        return new HashSet<>(typedefs.keySet());
     }
     
     public void printUsedSymbols() {

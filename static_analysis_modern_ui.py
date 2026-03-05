@@ -409,11 +409,15 @@ class AnalysisPanel(ctk.CTkFrame):
                     capture_output=True, text=True, timeout=60
                 )
                 
-                if result.stdout:
-                    # Save report
+                if result.stdout or result.stderr:
+                    # Save report (stdout + any stderr errors)
                     report_file = os.path.join(self.output_dir, 'analysis_report.txt')
                     with open(report_file, 'w') as f:
-                        f.write(result.stdout)
+                        f.write(result.stdout or "")
+                        if result.stderr and result.stderr.strip():
+                            f.write("\n--- ERRORS / WARNINGS ---\n")
+                            f.write(result.stderr.strip())
+                            f.write("\n")
                     self.app.log_message("      ✓ Analysis report saved")
                 
                 # Move output files
@@ -499,11 +503,16 @@ class AnalysisPanel(ctk.CTkFrame):
                         capture_output=True, text=True, timeout=60
                     )
 
+                    stderr_block = ""
+                    if result.stderr and result.stderr.strip():
+                        stderr_block = "\n--- ERRORS / WARNINGS ---\n" + result.stderr.strip() + "\n"
+
                     section = (
                         f"{'═' * 60}\n"
                         f"  FILE: {c_file.name}\n"
                         f"{'═' * 60}\n"
-                        + (result.stdout or "(no output)\n")
+                        + (result.stdout or "(no stdout output)\n")
+                        + stderr_block
                         + "\n"
                     )
                     combined_sections.append(section)

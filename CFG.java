@@ -171,6 +171,8 @@ class CFGBuilder {
     // Returns the last node of the constructed CFG fragment
     private static CFGNode buildCFGFromNode(ASTNode node, ControlFlowGraph cfg, CFGNode previous) {
         if (node == null) return previous;
+        // Unreachable code after return/goto — skip
+        if (previous == null) return null;
         
         if (node instanceof BlockNode) {
             BlockNode block = (BlockNode) node;

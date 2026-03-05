@@ -41,6 +41,9 @@ public class Main
             // Add typedef/struct names discovered in headers so the parser treats them as types
             externalTypes.addAll(customResolver.getTypedefNames());
             externalTypes.addAll(customResolver.getStructNames());
+            // Also register standard library typedefs (int64_t, size_t, etc.)
+            StandardLibrary stdLib = new StandardLibrary();
+            externalTypes.addAll(stdLib.getTypedefNames());
             if (!externalTypes.isEmpty()) {
                 System.out.println("Known types (incl. headers): " + externalTypes);
             }

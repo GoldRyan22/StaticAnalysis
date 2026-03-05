@@ -253,6 +253,12 @@ public class SemanticAnalyzer {
             FuncCallNode funcCall = (FuncCallNode) node;
             analyzeFunctionCall(funcCall);
         }
+        else if (node instanceof TernaryExprNode) {
+            TernaryExprNode ternary = (TernaryExprNode) node;
+            analyzeStatement(ternary.condition, expectedReturnType);
+            analyzeStatement(ternary.thenExpr, expectedReturnType);
+            analyzeStatement(ternary.elseExpr, expectedReturnType);
+        }
     }
     
     private void analyzeBinaryExpression(BinaryExprNode node) {
@@ -394,7 +400,7 @@ public class SemanticAnalyzer {
             IdNode id = (IdNode) node;
             Symbol symbol = symbolTable.lookup(id.name);
             if (symbol != null) {
-                return symbol.type;
+                return symbol.type != null ? symbol.type : "unknown";
             }
             addError("Variable '" + id.name + "' not declared");
             return "unknown";
@@ -412,6 +418,8 @@ public class SemanticAnalyzer {
             
             String leftType = inferType(binExpr.left);
             String rightType = inferType(binExpr.right);
+            if (leftType == null) leftType = "unknown";
+            if (rightType == null) rightType = "unknown";
             
             // Pointer arithmetic
             if (leftType.contains("*")) return leftType;
@@ -453,13 +461,17 @@ public class SemanticAnalyzer {
             FuncCallNode funcCall = (FuncCallNode) node;
             Symbol funcSymbol = symbolTable.lookup(funcCall.name);
             if (funcSymbol != null) {
-                return funcSymbol.returnType;
+                return funcSymbol.returnType != null ? funcSymbol.returnType : "unknown";
             }
             return "unknown";
         }
         else if (node instanceof CastExprNode) {
             // A C-style cast: the type of the expression is the cast-to type
             return ((CastExprNode) node).castType;
+        }
+        else if (node instanceof TernaryExprNode) {
+            // Ternary: type is the type of the then/else branch
+            return inferType(((TernaryExprNode) node).thenExpr);
         }
         
         return "unknown";
@@ -611,6 +623,7 @@ public class SemanticAnalyzer {
     }
     
     private String resolveTypedef(String type) {
+        if (type == null) return "unknown";
         // Keep resolving until we reach a base type
         // Uses lookupTypedef() instead of lookup() to avoid local variables shadowing typedefs
         // (e.g. a local variable named "list" should not shadow the typedef "list")

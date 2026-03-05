@@ -64,12 +64,29 @@ public class Token
 
       if(codeName.equals("CT_INT"))
       {
-         this.value = Integer.valueOf(value);
+         try {
+            this.value = Integer.valueOf(value);
+         } catch (NumberFormatException e) {
+            try {
+               this.value = Long.parseLong(value);
+            } catch (NumberFormatException e2) {
+               this.value = 0;
+            }
+         }
          //this.code = code.CT_INT;
       }
       else if(codeName.equals("HEX"))
       {
-         this.value = Integer.decode(value);
+         try {
+            this.value = Integer.decode(value);
+         } catch (NumberFormatException e) {
+            // Too large for int (e.g. 0xFFFFFFFFFFFF), use Long
+            try {
+               this.value = Long.decode(value);
+            } catch (NumberFormatException e2) {
+               this.value = 0L; // fallback for truly invalid hex
+            }
+         }
          this.code = "CT_INT";
       }
       else if(codeName.equals("CT_REAL"))

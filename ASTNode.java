@@ -85,8 +85,8 @@ class FuncDeclNode extends ASTNode
     public String toString(int indent) 
     {
         String argStr = args.stream().map(a -> a.type + " " + a.name).collect(Collectors.joining(", "));
-        return getIndent(indent) + "FuncDecl: " + retType + " " + name + "(" + argStr + ")\n" +
-               body.toString(indent + 1);
+        String bodyStr = (body != null) ? "\n" + body.toString(indent + 1) : ";";
+        return getIndent(indent) + "FuncDecl: " + retType + " " + name + "(" + argStr + ")" + bodyStr;
     }
 
     @Override
@@ -328,5 +328,23 @@ class CastExprNode extends ASTNode
     @Override
     public String toString(int indent) {
         return "((" + castType + ")" + expr.toString(0) + ")";
+    }
+}
+
+class TernaryExprNode extends ASTNode
+{
+    ASTNode condition;
+    ASTNode thenExpr;
+    ASTNode elseExpr;
+
+    public TernaryExprNode(ASTNode condition, ASTNode thenExpr, ASTNode elseExpr) {
+        this.condition = condition;
+        this.thenExpr = thenExpr;
+        this.elseExpr = elseExpr;
+    }
+
+    @Override
+    public String toString(int indent) {
+        return "(" + condition.toString(0) + " ? " + thenExpr.toString(0) + " : " + elseExpr.toString(0) + ")";
     }
 }

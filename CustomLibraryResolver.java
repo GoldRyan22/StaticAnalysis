@@ -53,7 +53,22 @@ public class CustomLibraryResolver {
         
         return customIncludes;
     }
-    
+
+    /**
+     * Extract custom includes from content string (for transitive header resolution)
+     */
+    private List<String> extractCustomIncludesFromContent(String content) {
+        List<String> includes = new ArrayList<>();
+        Pattern includePattern = Pattern.compile("#include\\s+\"([^\"]+)\"");
+        for (String line : content.split("\\r?\\n")) {
+            Matcher matcher = includePattern.matcher(line.trim());
+            if (matcher.find()) {
+                includes.add(matcher.group(1));
+            }
+        }
+        return includes;
+    }
+
     /**
      * Parse a header file and extract all declarations
      */
@@ -74,10 +89,16 @@ public class CustomLibraryResolver {
         System.out.println("Parsing custom header: " + headerFileName);
         
         try {
-            String content = new String(Files.readAllBytes(Paths.get(headerPath)));
-            
+            String rawContent = new String(Files.readAllBytes(Paths.get(headerPath)));
+
+            // Follow transitive includes from this header (before comment removal)
+            List<String> nestedIncludes = extractCustomIncludesFromContent(rawContent);
+            for (String nested : nestedIncludes) {
+                parseHeaderFile(nested);
+            }
+
             // Remove comments
-            content = removeComments(content);
+            String content = removeComments(rawContent);
             
             // Extract typedefs
             extractTypedefs(content);
@@ -134,7 +155,6 @@ public class CustomLibraryResolver {
             String name = matcher.group(1);
             int value = Integer.parseInt(matcher.group(2));
             defineConstants.put(name, value);
-            System.out.println("  Found #define constant: " + name + " = " + value);
         }
     }
     
@@ -182,7 +202,6 @@ public class CustomLibraryResolver {
             // Skip struct/union typedefs (handled separately)
             if (!baseType.startsWith("struct") && !baseType.startsWith("union")) {
                 typedefs.put(newName, baseType);
-                System.out.println("  Found typedef: " + newName + " = " + baseType);
             }
         }
         
@@ -204,7 +223,18 @@ public class CustomLibraryResolver {
             } else {
                 typedefs.put(typedefName, "struct " + typedefName);
             }
-            System.out.println("  Found struct typedef: " + typedefName);
+        }
+
+        // Function-type typedef: typedef returntype name(params);
+        // e.g. typedef void aeFileProc(struct aeEventLoop *eventLoop, int fd, ...);
+        Pattern funcTypedef = Pattern.compile(
+            "typedef\\s+[^(;]+?\\s+(\\w+)\\s*\\([^)]*\\)\\s*;",
+            Pattern.MULTILINE | Pattern.DOTALL
+        );
+        matcher = funcTypedef.matcher(content);
+        while (matcher.find()) {
+            String typedefName = matcher.group(1).trim();
+            typedefs.put(typedefName, "function");
         }
     }
     
@@ -291,7 +321,6 @@ public class CustomLibraryResolver {
             }
             
             structs.put(structName, struct);
-            System.out.println("  Found struct: " + structName + " with " + struct.fields.size() + " fields");
         }
     }
     
@@ -371,7 +400,6 @@ public class CustomLibraryResolver {
             
             CustomFunction func = new CustomFunction(funcName, returnType, paramTypes);
             functions.put(funcName, func);
-            System.out.println("  Found function: " + func);
         }
     }
     
@@ -436,6 +464,12 @@ public class CustomLibraryResolver {
             for (ASTNode arg : funcCall.args) {
                 scanNode(arg);
             }
+        }
+        else if (node instanceof TernaryExprNode) {
+            TernaryExprNode ternary = (TernaryExprNode) node;
+            scanNode(ternary.condition);
+            scanNode(ternary.thenExpr);
+            scanNode(ternary.elseExpr);
         }
         else if (node instanceof CastExprNode) {
             CastExprNode cast = (CastExprNode) node;

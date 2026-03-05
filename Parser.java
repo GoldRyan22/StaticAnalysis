@@ -31,7 +31,31 @@ public class Parser
         ProgramNode program = new ProgramNode();
         while (!isAtEnd()) 
         {
-            program.declarations.addAll(parseDeclaration());
+            int savedPos = current;
+            try {
+                program.declarations.addAll(parseDeclaration());
+            } catch (RuntimeException e) {
+                // Error recovery: ensure progress, then skip to next declaration boundary
+                if (current == savedPos) advance();
+                while (!isAtEnd()) {
+                    if (check("LACC")) {
+                        // Skip a braced block
+                        advance();
+                        int depth = 1;
+                        while (!isAtEnd() && depth > 0) {
+                            if (check("LACC")) { depth++; advance(); }
+                            else if (check("RACC")) { depth--; advance(); }
+                            else advance();
+                        }
+                        break;
+                    } else if (check("SEMICOLON")) {
+                        advance();
+                        break;
+                    } else {
+                        advance();
+                    }
+                }
+            }
             this.FuncsList = program.getFunctionsDecl();
         }
         return program;
@@ -86,7 +110,9 @@ public class Parser
     
     private boolean checkTypeStart() 
     {
-        if (check("UNSIGNED") || check("INT") || check("DOUBLE") || check("FLOAT") || check("CHAR") || check("VOID") || check("LONG") || check("STRUCT")) {
+        if (check("UNSIGNED") || check("SIGNED") || check("INT") || check("DOUBLE") || check("FLOAT") ||
+            check("CHAR") || check("VOID") || check("LONG") || check("SHORT") || check("STRUCT") ||
+            check("CONST") || check("VOLATILE") || check("INLINE") || check("RESTRICT")) {
             return true;
         }
         // Check for custom typedef names
@@ -104,6 +130,37 @@ public class Parser
     // --- Declarations ---
 
      private List<ASTNode> parseDeclaration() {
+        // Skip function attribute macros: unknown uppercase identifiers before the return type
+        while (check("ID") && !typedefNames.contains(peek().value.toString())) {
+            int lookahead = current + 1;
+            if (lookahead < tokens.size()) {
+                String nextCode = tokens.get(lookahead).code;
+                boolean nextIsType = nextCode.equals("INT") || nextCode.equals("VOID") ||
+                    nextCode.equals("CHAR") || nextCode.equals("LONG") || nextCode.equals("UNSIGNED") ||
+                    nextCode.equals("STRUCT") || nextCode.equals("STATIC") || nextCode.equals("CONST") ||
+                    nextCode.equals("VOLATILE") || nextCode.equals("DOUBLE") || nextCode.equals("FLOAT") ||
+                    nextCode.equals("SHORT") || nextCode.equals("SIGNED") || nextCode.equals("INLINE") ||
+                    (nextCode.equals("ID") && typedefNames.contains(tokens.get(lookahead).value.toString()));
+                if (nextIsType) {
+                    advance(); // skip the attribute macro ID
+                    // Also skip argument list if present: MACRO(args)
+                    if (check("LPAR")) {
+                        advance();
+                        int depth = 1;
+                        while (!isAtEnd() && depth > 0) {
+                            if (check("LPAR")) { depth++; advance(); }
+                            else if (check("RPAR")) { depth--; advance(); }
+                            else advance();
+                        }
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
         // Handle storage class specifiers (static, extern, etc.)
         boolean isStatic = false;
         if (check("STATIC")) {
@@ -172,42 +229,118 @@ public class Parser
 
     private ASTNode parseTypedefDecl() 
     {
-        // Handle: typedef struct Name { ... } TypeName;
-        if (check("STRUCT")) {
-            advance(); // consume STRUCT
+        // Handle: typedef struct/union Name { ... } TypeName;
+        if (check("STRUCT") || check("UNION")) {
+            boolean isUnion = check("UNION");
+            advance(); // consume STRUCT or UNION
             String structName = "";
             if (check("ID")) {
                 structName = advance().value.toString();
             }
             
-            consume("LACC", "Expect { after struct in typedef");
+            consume("LACC", "Expect { after struct/union in typedef");
             
             List<VarDeclNode> fields = new ArrayList<>();
             while (!check("RACC") && !isAtEnd()) {
+                // Handle anonymous struct/union members: struct { ... }; or union { ... };
+                if (check("STRUCT") || check("UNION")) {
+                    advance();
+                    if (check("LACC")) {
+                        advance(); int d = 1;
+                        while (!isAtEnd() && d > 0) {
+                            if (check("LACC")) { d++; advance(); }
+                            else if (check("RACC")) { d--; if (d > 0) advance(); else break; }
+                            else advance();
+                        }
+                        consume("RACC", "Expect } to close anonymous struct/union");
+                        if (check("ID")) consume("ID", ""); // optional member name
+                        if (check("SEMICOLON")) advance();
+                        continue;
+                    } else if (check("ID")) {
+                        // named nested struct used as a field type - parse as field
+                        current--; // put STRUCT/UNION back
+                    }
+                }
+                if (check("RACC")) break;
                 String type = parseType();
+                if (check("RACC") || check("SEMICOLON")) {
+                    if (check("SEMICOLON")) advance(); // anonymous field type
+                    continue;
+                }
+                // Handle function pointer fields: type (*name)(params);
+                if (check("LPAR")) {
+                    // skip function pointer - consume to semicolon
+                    while (!check("SEMICOLON") && !check("RACC") && !isAtEnd()) advance();
+                    if (check("SEMICOLON")) advance();
+                    continue;
+                }
                 String fieldName = consume("ID", "Expect field name").value.toString();
-                consume("SEMICOLON", "Expect ;");
+                // Skip optional array brackets
+                if (check("LBRACKET")) {
+                    while (!check("RBRACKET") && !isAtEnd()) advance();
+                    advance(); // consume ]
+                }
+                if (check("SEMICOLON")) advance();
                 fields.add(new VarDeclNode(type, fieldName, null));
             }
             consume("RACC", "Expect }");
             
-            Token newTypeNameTk = consume("ID", "Expect type name after struct definition");
-            String newTypeName = newTypeNameTk.value.toString();
+            // After }, there might be: TypeName; or TypeName[]; or varName[] = {...};
+            String newTypeName = "";
+            if (check("ID")) {
+                newTypeName = advance().value.toString();
+            }
+            // Skip optional array brackets and initializer
+            if (check("LBRACKET")) {
+                while (!check("RBRACKET") && !isAtEnd()) advance();
+                advance(); // consume ]
+            }
+            if (check("ASSIGN")) {
+                advance(); // consume =
+                if (check("LACC")) {
+                    advance(); int d = 1;
+                    while (!isAtEnd() && d > 0) {
+                        if (check("LACC")) { d++; advance(); }
+                        else if (check("RACC")) { d--; if (d > 0) advance(); else break; }
+                        else advance();
+                    }
+                    consume("RACC", "Expect } to close initializer");
+                }
+            }
             consume("SEMICOLON", "Expect ; after typedef");
             
-            // Register the new type name
-            typedefNames.add(newTypeName);
-            
-            // Create both struct declaration and typedef
-            // For simplicity, we'll just return typedef and assume struct is implicitly defined
-            String baseType = "struct " + (structName.isEmpty() ? newTypeName : structName);
-            return new TypedefDeclNode(baseType, newTypeName);
+            if (!newTypeName.isEmpty()) {
+                typedefNames.add(newTypeName);
+            }
+            String keyword = isUnion ? "union" : "struct";
+            String baseType = keyword + " " + (structName.isEmpty() ? newTypeName : structName);
+            return new TypedefDeclNode(baseType, newTypeName.isEmpty() ? baseType : newTypeName);
         }
         
         // Handle: typedef existing_type new_type;
         String baseType = parseType();
+        // Handle function typedef: typedef type (*name)(params);
+        if (check("LPAR")) {
+            // Function pointer typedef: typedef type (*name)(params);
+            advance(); // consume (
+            while (check("MUL")) advance(); // skip *
+            String newTypeName = check("ID") ? advance().value.toString() : "";
+            consume("RPAR", "Expect ) in function pointer typedef");
+            // Skip params
+            consume("LPAR", "Expect ( for function pointer params");
+            while (!check("RPAR") && !isAtEnd()) advance();
+            consume("RPAR", "Expect ) after function pointer params");
+            consume("SEMICOLON", "Expect ; after typedef");
+            if (!newTypeName.isEmpty()) typedefNames.add(newTypeName);
+            return new TypedefDeclNode(baseType, newTypeName);
+        }
         Token newTypeNameTk = consume("ID", "Expect new type name after base type in typedef");
         String newTypeName = newTypeNameTk.value.toString();
+        // Skip optional array brackets for typedef'd array types
+        if (check("LBRACKET")) {
+            while (!check("RBRACKET") && !isAtEnd()) advance();
+            advance();
+        }
         consume("SEMICOLON", "Expect ; after typedef");
         
         // Register the new type name
@@ -222,16 +355,37 @@ public class Parser
         List<VarDeclNode> args = new ArrayList<>();
         if (!check("RPAR")) {
             do {
+                // Handle variadic parameter: ...
+                if (check("DOT")) {
+                    while (check("DOT")) advance(); // consume all three dots
+                    break;
+                }
                 String argType = parseType();
                 // Handle (void) as empty parameter list (C convention)
                 if (argType.equals("void") && check("RPAR")) {
                     break;
                 }
+                // Parameter may omit name (e.g., forward declaration)
+                if (check("RPAR") || check("COMMA")) {
+                    args.add(new VarDeclNode(argType, "_anon", null));
+                    continue;
+                }
                 String argName = consume("ID", "Expect argument name").value.toString();
+                // Skip optional array brackets in parameter (e.g., char *[])
+                if (check("LBRACKET")) {
+                    while (!check("RBRACKET") && !isAtEnd()) advance();
+                    advance(); // consume ]
+                }
                 args.add(new VarDeclNode(argType, argName, null));
             } while (match("COMMA"));
         }
         consume("RPAR", "Expect )");
+        
+        // Forward declaration: ends with ';' instead of a body block
+        if (check("SEMICOLON")) {
+            advance();
+            return new FuncDeclNode(type, name, args, null);
+        }
         
         ASTNode body = parseBlock();
         return new FuncDeclNode(type, name, args, body);
@@ -264,9 +418,25 @@ public class Parser
         String currentType = baseType;
 
         if (match("LBRACKET")) {
-             Token size = consume("CT_INT", "Expect array size");
-             consume("RBRACKET", "Expect ]");
-             currentType += "[" + size.value + "]";
+            // Empty brackets [] means unsized array
+            if (match("RBRACKET")) {
+                currentType += "[]";
+            } else {
+                // Try to parse a constant size
+                if (check("CT_INT")) {
+                    Token size = advance();
+                    currentType += "[" + size.value + "]";
+                } else {
+                    // Non-literal size (e.g. macro constant): consume until ]
+                    StringBuilder sb = new StringBuilder("[");
+                    while (!check("RBRACKET") && !check("END")) {
+                        sb.append(advance().value);
+                    }
+                    sb.append("]");
+                    currentType += sb.toString();
+                }
+                consume("RBRACKET", "Expect ]");
+            }
         }
 
         ASTNode init = null;
@@ -282,6 +452,12 @@ public class Parser
     private String parseType() 
     {
         String baseType;
+
+        // Consume optional type qualifiers / storage class specifiers
+        while (check("CONST") || check("VOLATILE") || check("RESTRICT") || check("REGISTER") ||
+               check("INLINE") || check("EXTERN") || check("AUTO")) {
+            advance();
+        }
         
         if (match("INT")) 
         {
@@ -298,7 +474,9 @@ public class Parser
         else if (match("UNSIGNED")) 
         {
             baseType = "unsigned";
-            if(match("short")) baseType += " short";
+            if (match("SHORT")) baseType = "unsigned short";
+            else if(match("CHAR")) baseType = "unsigned char";
+            else if (match("INT")) baseType = "unsigned int";
             else
             {
                 if (match("LONG")) {
@@ -313,6 +491,20 @@ public class Parser
         else if (match("DOUBLE")) baseType = "double";
         else if (match("FLOAT")) baseType = "float";
         else if (match("VOID")) baseType = "void";
+        else if (match("SHORT")) {
+            baseType = "short";
+            if (match("INT")) {} // short int = short
+        }
+        else if (match("SIGNED")) {
+            baseType = "int"; // signed defaults to signed int
+            if (match("CHAR")) baseType = "signed char";
+            else if (match("SHORT")) baseType = "short";
+            else if (match("INT")) {}
+            else if (match("LONG")) {
+                baseType = "long";
+                if (match("LONG")) baseType = "long long";
+            }
+        }
         else if (match("LONG")) {
             baseType = "long";
             if (match("LONG")) baseType = "long long";
@@ -349,11 +541,37 @@ public class Parser
         if (match("FOR")) return parseFor(); 
         if (match("RETURN")) return parseReturn();
         if (match("BREAK")) { consume("SEMICOLON", "Expect ;"); return new LiteralNode("BREAK", "break"); }
+        if (match("CONTINUE")) { consume("SEMICOLON", "Expect ;"); return new LiteralNode("CONTINUE", "continue"); }
+        if (match("GOTO")) {
+            // skip the label identifier and semicolon
+            if (check("ID")) advance();
+            consume("SEMICOLON", "Expect ; after goto");
+            return new LiteralNode("GOTO", "goto");
+        }
+        if (match("DO")) return parseDoWhile();
+        if (match("SWITCH")) return parseSwitch();
+        // case/default labels (inside switch bodies)
+        if (match("CASE")) {
+            parseExpression();
+            consume("COLON", "Expect ':' after case value");
+            return new LiteralNode("CASE_LABEL", "case");
+        }
+        if (match("DEFAULT")) {
+            consume("COLON", "Expect ':' after default");
+            return new LiteralNode("DEFAULT_LABEL", "default");
+        }
         if (check("LACC")) return parseBlock();
         
         // Handle empty statement (just a semicolon)
         if (match("SEMICOLON")) {
             return new LiteralNode("EMPTY", "");
+        }
+
+        // Labeled statement: IDENTIFIER ':' statement
+        if (check("ID") && current + 1 < tokens.size() && tokens.get(current + 1).code.equals("COLON")) {
+            advance(); // consume label name
+            advance(); // consume ':'
+            return parseStatement(); // parse the labeled statement
         }
         
         ASTNode expr = parseExpression();
@@ -414,11 +632,47 @@ public class Parser
     private ASTNode parseFor() 
     {
         consume("LPAR", "Expect (");
-        ASTNode init = parseExpression(); 
+
+        // Init: can be empty, a declaration, or an expression
+        ASTNode init = new LiteralNode("EMPTY", "");
+        if (!check("SEMICOLON")) {
+            if (checkTypeStart()) {
+                int savedPos = current;
+                String t = parseType();
+                if (check("ID")) {
+                    String n = advance().value.toString();
+                    // parseVarDecl consumes the semicolon itself
+                    List<ASTNode> decls = parseVarDecl(t, n);
+                    init = decls.isEmpty() ? new LiteralNode("EMPTY", "") : decls.get(0);
+                    // semicolon already consumed by parseVarDecl, fall through to cond
+                    ASTNode cond = check("SEMICOLON") ? new LiteralNode("CT_INT", 1) : parseExpression();
+                    consume("SEMICOLON", "Expect ;");
+                    ASTNode step = check("RPAR") ? new LiteralNode("EMPTY", "") : parseExpression();
+                    consume("RPAR", "Expect )");
+                    ASTNode body = parseStatement();
+                    BlockNode forBlock = new BlockNode();
+                    forBlock.statements.add(init);
+                    BlockNode whileBody = new BlockNode();
+                    whileBody.statements.add(body);
+                    whileBody.statements.add(step);
+                    forBlock.statements.add(new WhileStmtNode(cond, whileBody));
+                    return forBlock;
+                } else {
+                    current = savedPos;
+                    init = parseExpression();
+                    consume("SEMICOLON", "Expect ;");
+                }
+            } else {
+                init = parseExpression();
+                consume("SEMICOLON", "Expect ;");
+            }
+        } else {
+            consume("SEMICOLON", "Expect ;");
+        }
+
+        ASTNode cond = check("SEMICOLON") ? new LiteralNode("CT_INT", 1) : parseExpression();
         consume("SEMICOLON", "Expect ;");
-        ASTNode cond = parseExpression();
-        consume("SEMICOLON", "Expect ;");
-        ASTNode step = parseExpression();
+        ASTNode step = check("RPAR") ? new LiteralNode("EMPTY", "") : parseExpression();
         consume("RPAR", "Expect )");
         ASTNode body = parseStatement();
         
@@ -444,6 +698,26 @@ public class Parser
         return new ReturnStmtNode(value);
     }
 
+    private ASTNode parseDoWhile() {
+        ASTNode body = parseStatement();
+        consume("WHILE", "Expect 'while' after do body");
+        consume("LPAR", "Expect '('");
+        ASTNode cond = parseExpression();
+        consume("RPAR", "Expect ')'");
+        consume("SEMICOLON", "Expect ';' after do-while");
+        return new WhileStmtNode(cond, body);
+    }
+
+    private ASTNode parseSwitch() {
+        consume("LPAR", "Expect '('");
+        ASTNode expr = parseExpression();
+        consume("RPAR", "Expect ')'");
+        // Parse the body (contains case/default labels handled in parseStatement)
+        ASTNode body = parseBlock();
+        // Model switch as a while-false so CFG captures all branches
+        return new WhileStmtNode(expr, body);
+    }
+
     // --- Expressions
 
     private ASTNode parseExpression() 
@@ -453,7 +727,7 @@ public class Parser
 
     private ASTNode parseAssignment() 
     {
-        ASTNode expr = parseOr();
+        ASTNode expr = parseTernary();
         if (match("ASSIGN")) 
         {
             ASTNode value = parseAssignment();
@@ -476,6 +750,17 @@ public class Parser
         return expr;
     }
 
+    private ASTNode parseTernary() {
+        ASTNode cond = parseOr();
+        if (match("QUESTION")) {
+            ASTNode thenExpr = parseExpression();
+            consume("COLON", "Expect ':' in ternary expression");
+            ASTNode elseExpr = parseTernary();
+            return new TernaryExprNode(cond, thenExpr, elseExpr);
+        }
+        return cond;
+    }
+
     private ASTNode parseOr() 
     {
         ASTNode expr = parseAnd();
@@ -489,11 +774,31 @@ public class Parser
 
     private ASTNode parseAnd() 
     {
-        ASTNode expr = parseEquality();
+        ASTNode expr = parseBitOr();
         while (match("AND")) 
         {
-            ASTNode right = parseEquality();
+            ASTNode right = parseBitOr();
             expr = new BinaryExprNode(expr, "&&", right);
+        }
+        return expr;
+    }
+
+    private ASTNode parseBitOr() {
+        ASTNode expr = parseBitAnd();
+        while (check("BITOR") && !(current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN"))) {
+            advance();
+            ASTNode right = parseBitAnd();
+            expr = new BinaryExprNode(expr, "|", right);
+        }
+        return expr;
+    }
+
+    private ASTNode parseBitAnd() {
+        ASTNode expr = parseEquality();
+        while (check("BITAND") && !(current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN"))) {
+            advance();
+            ASTNode right = parseEquality();
+            expr = new BinaryExprNode(expr, "&", right);
         }
         return expr;
     }
@@ -544,10 +849,10 @@ public class Parser
     private ASTNode parseTerm() 
     {
         ASTNode expr = parseUnary();
-        while ((check("MUL") || check("DIV"))
+        while ((check("MUL") || check("DIV") || check("MOD"))
                && !(current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN"))) 
         {
-            String op = advance().code.equals("MUL") ? "*" : "/";
+            String op = advance().code.equals("MUL") ? "*" : (previous().code.equals("DIV") ? "/" : "%");
             ASTNode right = parseUnary();
             expr = new BinaryExprNode(expr, op, right);
         }
@@ -678,6 +983,18 @@ public class Parser
         {
             Token t = advance();
             return new IdNode(t.value.toString());
+        }
+
+        // Initializer list: { expr, expr, ... }
+        if (match("LACC")) {
+            int depth = 1;
+            while (depth > 0 && !isAtEnd()) {
+                if (check("LACC")) { depth++; advance(); }
+                else if (check("RACC")) { depth--; if (depth > 0) advance(); else break; }
+                else advance();
+            }
+            consume("RACC", "Expect '}' to close initializer list");
+            return new LiteralNode("INIT_LIST", "{}");
         }
         
         throw error(peek(), "Expect expression.");
