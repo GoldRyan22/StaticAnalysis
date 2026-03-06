@@ -505,6 +505,396 @@ public class StandardLibrary {
         
         addTypedef("cpu_set_t", "struct cpu_set");
         addTypedef("clockid_t", "int");
+
+        // signal.h
+        addFunction("signal", "sighandler_t", "int", "sighandler_t");
+        addFunction("raise", "int", "int");
+        addFunction("kill", "int", "pid_t", "int");
+        addFunction("killpg", "int", "int", "int");
+        addFunction("sigaction", "int", "int", "struct sigaction*", "struct sigaction*");
+        addFunction("sigprocmask", "int", "int", "sigset_t*", "sigset_t*");
+        addFunction("sigpending", "int", "sigset_t*");
+        addFunction("sigsuspend", "int", "sigset_t*");
+        addFunction("sigemptyset", "int", "sigset_t*");
+        addFunction("sigfillset", "int", "sigset_t*");
+        addFunction("sigaddset", "int", "sigset_t*", "int");
+        addFunction("sigdelset", "int", "sigset_t*", "int");
+        addFunction("sigismember", "int", "sigset_t*", "int");
+        addFunction("sigwait", "int", "sigset_t*", "int*");
+        addFunction("sigwaitinfo", "int", "sigset_t*", "siginfo_t*");
+        addFunction("sigtimedwait", "int", "sigset_t*", "siginfo_t*", "struct timespec*");
+        addFunction("sigqueue", "int", "pid_t", "int", "void*");
+        addFunction("psignal", "void", "int", "char*");
+        addFunction("strsignal", "char*", "int");
+        addFunction("pthread_sigmask", "int", "int", "sigset_t*", "sigset_t*");
+
+        addTypedef("sig_atomic_t", "int");
+        addTypedef("sighandler_t", "void*");
+        addTypedef("siginfo_t", "struct siginfo");
+
+        // ctype.h — POSIX extensions
+        addFunction("isascii", "int", "int");
+        addFunction("toascii", "int", "int");
+        addFunction("_tolower", "int", "int");
+        addFunction("_toupper", "int", "int");
+
+        // math.h
+        addFunction("sin",  "double", "double");
+        addFunction("cos",  "double", "double");
+        addFunction("tan",  "double", "double");
+        addFunction("asin", "double", "double");
+        addFunction("acos", "double", "double");
+        addFunction("atan", "double", "double");
+        addFunction("atan2","double", "double", "double");
+        addFunction("sinh", "double", "double");
+        addFunction("cosh", "double", "double");
+        addFunction("tanh", "double", "double");
+        addFunction("asinh","double", "double");
+        addFunction("acosh","double", "double");
+        addFunction("atanh","double", "double");
+        addFunction("exp",  "double", "double");
+        addFunction("exp2", "double", "double");
+        addFunction("expm1","double", "double");
+        addFunction("log",  "double", "double");
+        addFunction("log2", "double", "double");
+        addFunction("log10","double", "double");
+        addFunction("log1p","double", "double");
+        addFunction("logb", "double", "double");
+        addFunction("pow",  "double", "double", "double");
+        addFunction("sqrt", "double", "double");
+        addFunction("cbrt", "double", "double");
+        addFunction("hypot","double", "double", "double");
+        addFunction("ceil", "double", "double");
+        addFunction("floor","double", "double");
+        addFunction("round","double", "double");
+        addFunction("trunc","double", "double");
+        addFunction("fabs", "double", "double");
+        addFunction("fmod", "double", "double", "double");
+        addFunction("remainder","double","double","double");
+        addFunction("fma",  "double", "double", "double", "double");
+        addFunction("fmax", "double", "double", "double");
+        addFunction("fmin", "double", "double", "double");
+        addFunction("fdim", "double", "double", "double");
+        addFunction("nan",  "double", "char*");
+        addFunction("frexp","double", "double", "int*");
+        addFunction("ldexp","double", "double", "int");
+        addFunction("modf", "double", "double", "double*");
+        addFunction("scalbn","double","double","int");
+        addFunction("scalbln","double","double","long");
+        addFunction("ilogb","int",   "double");
+        addFunction("nearbyint","double","double");
+        addFunction("rint", "double","double");
+        addFunction("lrint","long",  "double");
+        addFunction("llrint","long long","double");
+        addFunction("lround","long", "double");
+        addFunction("llround","long long","double");
+        addFunction("erf",  "double","double");
+        addFunction("erfc", "double","double");
+        addFunction("tgamma","double","double");
+        addFunction("lgamma","double","double");
+        addFunction("isnan",    "int","double");
+        addFunction("isinf",    "int","double");
+        addFunction("isfinite", "int","double");
+        addFunction("isnormal", "int","double");
+        addFunction("signbit",  "int","double");
+        addFunction("fpclassify","int","double");
+        // float variants
+        addFunction("sinf",  "float","float");
+        addFunction("cosf",  "float","float");
+        addFunction("tanf",  "float","float");
+        addFunction("asinf", "float","float");
+        addFunction("acosf", "float","float");
+        addFunction("atanf", "float","float");
+        addFunction("atan2f","float","float","float");
+        addFunction("expf",  "float","float");
+        addFunction("logf",  "float","float");
+        addFunction("log2f", "float","float");
+        addFunction("log10f","float","float");
+        addFunction("powf",  "float","float","float");
+        addFunction("sqrtf", "float","float");
+        addFunction("fabsf", "float","float");
+        addFunction("ceilf", "float","float");
+        addFunction("floorf","float","float");
+        addFunction("roundf","float","float");
+        addFunction("fmaxf", "float","float","float");
+        addFunction("fminf", "float","float","float");
+        addFunction("fmodf", "float","float","float");
+        // long double variants
+        addFunction("sinl",  "long double","long double");
+        addFunction("cosl",  "long double","long double");
+        addFunction("sqrtl", "long double","long double");
+        addFunction("fabsl", "long double","long double");
+        addFunction("ceill", "long double","long double");
+        addFunction("floorl","long double","long double");
+        addFunction("roundl","long double","long double");
+        addFunction("powl",  "long double","long double","long double");
+        addFunction("logl",  "long double","long double");
+        addFunction("log10l","long double","long double");
+        addFunction("expl",  "long double","long double");
+        addFunction("fmodl", "long double","long double","long double");
+
+        // fcntl.h
+        addFunction("fcntl",   "int","int","int","...");
+        addFunction("creat",   "int","char*","mode_t");
+        addFunction("openat",  "int","int","char*","int","...");
+        addFunction("posix_fadvise", "int","int","off_t","off_t","int");
+        addFunction("posix_fallocate","int","int","off_t","off_t");
+
+        // sys/stat.h
+        addFunction("stat",   "int","char*","struct stat*");
+        addFunction("fstat",  "int","int","struct stat*");
+        addFunction("lstat",  "int","char*","struct stat*");
+        addFunction("fstatat","int","int","char*","struct stat*","int");
+        addFunction("chmod",  "int","char*","mode_t");
+        addFunction("fchmod", "int","int","mode_t");
+        addFunction("fchmodat","int","int","char*","mode_t","int");
+        addFunction("mkdir",  "int","char*","mode_t");
+        addFunction("mkfifo", "int","char*","mode_t");
+        addFunction("mknod",  "int","char*","mode_t","dev_t");
+        addFunction("umask",  "mode_t","mode_t");
+
+        // sys/time.h
+        addFunction("gettimeofday","int","struct timeval*","void*");
+        addFunction("settimeofday","int","struct timeval*","void*");
+        addFunction("getitimer",   "int","int","struct itimerval*");
+        addFunction("setitimer",   "int","int","struct itimerval*","struct itimerval*");
+        addFunction("select","int","int","fd_set*","fd_set*","fd_set*","struct timeval*");
+        addFunction("pselect","int","int","fd_set*","fd_set*","fd_set*","struct timespec*","sigset_t*");
+
+        addTypedef("fd_set","struct fd_set");
+
+        // sys/socket.h
+        addFunction("socket",    "int","int","int","int");
+        addFunction("bind",      "int","int","struct sockaddr*","socklen_t");
+        addFunction("listen",    "int","int","int");
+        addFunction("accept",    "int","int","struct sockaddr*","socklen_t*");
+        addFunction("accept4",   "int","int","struct sockaddr*","socklen_t*","int");
+        addFunction("connect",   "int","int","struct sockaddr*","socklen_t");
+        addFunction("send",    "ssize_t","int","void*","size_t","int");
+        addFunction("recv",    "ssize_t","int","void*","size_t","int");
+        addFunction("sendto",  "ssize_t","int","void*","size_t","int","struct sockaddr*","socklen_t");
+        addFunction("recvfrom","ssize_t","int","void*","size_t","int","struct sockaddr*","socklen_t*");
+        addFunction("sendmsg", "ssize_t","int","struct msghdr*","int");
+        addFunction("recvmsg", "ssize_t","int","struct msghdr*","int");
+        addFunction("getsockopt","int","int","int","int","void*","socklen_t*");
+        addFunction("setsockopt","int","int","int","int","void*","socklen_t");
+        addFunction("getsockname","int","int","struct sockaddr*","socklen_t*");
+        addFunction("getpeername","int","int","struct sockaddr*","socklen_t*");
+        addFunction("socketpair","int","int","int","int","int*");
+        addFunction("shutdown",  "int","int","int");
+
+        // arpa/inet.h
+        addFunction("inet_addr","in_addr_t","char*");
+        addFunction("inet_ntoa","char*","struct in_addr");
+        addFunction("inet_ntop","char*","int","void*","char*","socklen_t");
+        addFunction("inet_pton","int","int","char*","void*");
+        addFunction("htonl","unsigned int","unsigned int");
+        addFunction("htons","unsigned short","unsigned short");
+        addFunction("ntohl","unsigned int","unsigned int");
+        addFunction("ntohs","unsigned short","unsigned short");
+
+        // netdb.h
+        addFunction("getaddrinfo","int","char*","char*","struct addrinfo*","struct addrinfo**");
+        addFunction("freeaddrinfo","void","struct addrinfo*");
+        addFunction("getnameinfo","int","struct sockaddr*","socklen_t","char*","socklen_t","char*","socklen_t","int");
+        addFunction("gai_strerror","char*","int");
+        addFunction("gethostbyname","struct hostent*","char*");
+        addFunction("gethostbyaddr","struct hostent*","void*","socklen_t","int");
+
+        // setjmp.h
+        addFunction("setjmp",   "int","jmp_buf");
+        addFunction("longjmp",  "void","jmp_buf","int");
+        addFunction("sigsetjmp","int","sigjmp_buf","int");
+        addFunction("siglongjmp","void","sigjmp_buf","int");
+        addFunction("_setjmp",  "int","jmp_buf");
+        addFunction("_longjmp", "void","jmp_buf","int");
+
+        addTypedef("jmp_buf",    "int*");
+        addTypedef("sigjmp_buf", "int*");
+
+        // locale.h
+        addFunction("setlocale", "char*","int","char*");
+        addFunction("localeconv","struct lconv*");
+
+        // stdarg.h (intrinsics)
+        addFunction("va_start","void","va_list","...");
+        addFunction("va_end",  "void","va_list");
+        addFunction("va_arg",  "void*","va_list","...");
+        addFunction("va_copy", "void","va_list","va_list");
+
+        // dirent.h
+        addFunction("opendir",  "DIR*","char*");
+        addFunction("readdir",  "struct dirent*","DIR*");
+        addFunction("closedir", "int","DIR*");
+        addFunction("rewinddir","void","DIR*");
+        addFunction("seekdir",  "void","DIR*","long");
+        addFunction("telldir",  "long","DIR*");
+        addFunction("scandir",  "int","char*","struct dirent***","void*","void*");
+        addFunction("alphasort","int","struct dirent**","struct dirent**");
+        addFunction("fdopendir","DIR*","int");
+        addFunction("dirfd",    "int","DIR*");
+
+        addTypedef("DIR","struct _DIR");
+
+        // sys/mman.h
+        addFunction("mmap",     "void*","void*","size_t","int","int","int","off_t");
+        addFunction("munmap",   "int","void*","size_t");
+        addFunction("mprotect", "int","void*","size_t","int");
+        addFunction("msync",    "int","void*","size_t","int");
+        addFunction("mlock",    "int","void*","size_t");
+        addFunction("munlock",  "int","void*","size_t");
+        addFunction("mlockall", "int","int");
+        addFunction("munlockall","int");
+        addFunction("madvise",  "int","void*","size_t","int");
+        addFunction("shm_open", "int","char*","int","mode_t");
+        addFunction("shm_unlink","int","char*");
+
+        // poll.h
+        addFunction("poll", "int","struct pollfd*","nfds_t","int");
+        addFunction("ppoll","int","struct pollfd*","nfds_t","struct timespec*","sigset_t*");
+
+        // sys/epoll.h (Linux)
+        addFunction("epoll_create", "int","int");
+        addFunction("epoll_create1","int","int");
+        addFunction("epoll_ctl",    "int","int","int","int","struct epoll_event*");
+        addFunction("epoll_wait",   "int","int","struct epoll_event*","int","int");
+        addFunction("epoll_pwait",  "int","int","struct epoll_event*","int","int","sigset_t*");
+
+        // sys/wait.h
+        addFunction("wait",    "pid_t","int*");
+        addFunction("waitpid", "pid_t","pid_t","int*","int");
+        addFunction("waitid",  "int","int","id_t","siginfo_t*","int");
+        addFunction("wait3",   "pid_t","int*","int","struct rusage*");
+        addFunction("wait4",   "pid_t","pid_t","int*","int","struct rusage*");
+
+        // sys/resource.h
+        addFunction("getrusage","int","int","struct rusage*");
+        addFunction("getrlimit","int","int","struct rlimit*");
+        addFunction("setrlimit","int","int","struct rlimit*");
+        addFunction("prlimit",  "int","pid_t","int","struct rlimit*","struct rlimit*");
+
+        // sys/ioctl.h
+        addFunction("ioctl","int","int","unsigned long","...");
+
+        // termios.h
+        addFunction("tcgetattr",   "int","int","struct termios*");
+        addFunction("tcsetattr",   "int","int","int","struct termios*");
+        addFunction("tcsendbreak", "int","int","int");
+        addFunction("tcflush",     "int","int","int");
+        addFunction("tcflow",      "int","int","int");
+        addFunction("cfgetispeed", "speed_t","struct termios*");
+        addFunction("cfgetospeed", "speed_t","struct termios*");
+        addFunction("cfsetispeed", "int","struct termios*","speed_t");
+        addFunction("cfsetospeed", "int","struct termios*","speed_t");
+
+        addTypedef("speed_t","unsigned int");
+
+        // assert.h
+        addFunction("assert","void","int");
+
+        // POSIX realtime (time.h / time.h extensions)
+        addFunction("clock_gettime",    "int","clockid_t","struct timespec*");
+        addFunction("clock_settime",    "int","clockid_t","struct timespec*");
+        addFunction("clock_getres",     "int","clockid_t","struct timespec*");
+        addFunction("nanosleep",        "int","struct timespec*","struct timespec*");
+        addFunction("timer_create",     "int","clockid_t","struct sigevent*","timer_t*");
+        addFunction("timer_delete",     "int","timer_t");
+        addFunction("timer_settime",    "int","timer_t","int","struct itimerspec*","struct itimerspec*");
+        addFunction("timer_gettime",    "int","timer_t","struct itimerspec*");
+        addFunction("timer_getoverrun", "int","timer_t");
+
+        addTypedef("timer_t","void*");
+
+        // string.h POSIX / GNU extras
+        addFunction("strtok_r",    "char*","char*","char*","char**");
+        addFunction("strcasestr",  "char*","char*","char*");
+        addFunction("strncasecmp", "int","char*","char*","size_t");
+        addFunction("strcasecmp",  "int","char*","char*");
+        addFunction("strsep",      "char*","char**","char*");
+        addFunction("strchrnul",   "char*","char*","int");
+        addFunction("basename",    "char*","char*");
+        addFunction("dirname",     "char*","char*");
+
+        // stdio.h extras
+        addFunction("fileno",    "int","FILE*");
+        addFunction("fdopen",    "FILE*","int","char*");
+        addFunction("popen",     "FILE*","char*","char*");
+        addFunction("pclose",    "int","FILE*");
+        addFunction("getline",   "ssize_t","char**","size_t*","FILE*");
+        addFunction("getdelim",  "ssize_t","char**","size_t*","int","FILE*");
+        addFunction("asprintf",  "int","char**","char*","...");
+        addFunction("vasprintf", "int","char**","char*","va_list");
+        addFunction("dprintf",   "int","int","char*","...");
+        addFunction("vdprintf",  "int","int","char*","va_list");
+
+        // stdlib.h extras
+        addFunction("mkstemp",   "int","char*");
+        addFunction("mkostemp",  "int","char*","int");
+        addFunction("mkdtemp",   "char*","char*");
+        addFunction("realpath",  "char*","char*","char*");
+        addFunction("setenv",    "int","char*","char*","int");
+        addFunction("unsetenv",  "int","char*");
+        addFunction("putenv",    "int","char*");
+        addFunction("clearenv",  "int");
+
+        // wchar.h
+        addFunction("wcslen",  "size_t","wchar_t*");
+        addFunction("wcscpy",  "wchar_t*","wchar_t*","wchar_t*");
+        addFunction("wcsncpy", "wchar_t*","wchar_t*","wchar_t*","size_t");
+        addFunction("wcscat",  "wchar_t*","wchar_t*","wchar_t*");
+        addFunction("wcsncat", "wchar_t*","wchar_t*","wchar_t*","size_t");
+        addFunction("wcscmp",  "int","wchar_t*","wchar_t*");
+        addFunction("wcsncmp", "int","wchar_t*","wchar_t*","size_t");
+        addFunction("wcschr",  "wchar_t*","wchar_t*","wchar_t");
+        addFunction("wcsrchr", "wchar_t*","wchar_t*","wchar_t");
+        addFunction("wcsstr",  "wchar_t*","wchar_t*","wchar_t*");
+        addFunction("wcstok",  "wchar_t*","wchar_t*","wchar_t*","wchar_t**");
+        addFunction("wmemcpy", "wchar_t*","wchar_t*","wchar_t*","size_t");
+        addFunction("wmemmove","wchar_t*","wchar_t*","wchar_t*","size_t");
+        addFunction("wmemset", "wchar_t*","wchar_t*","wchar_t","size_t");
+        addFunction("wmemcmp", "int","wchar_t*","wchar_t*","size_t");
+        addFunction("wprintf", "int","wchar_t*","...");
+        addFunction("fwprintf","int","FILE*","wchar_t*","...");
+        addFunction("swprintf","int","wchar_t*","size_t","wchar_t*","...");
+        addFunction("wscanf",  "int","wchar_t*","...");
+        addFunction("fwscanf", "int","FILE*","wchar_t*","...");
+        addFunction("swscanf", "int","wchar_t*","wchar_t*","...");
+        addFunction("btowc","wint_t","int");
+        addFunction("wctob","int","wint_t");
+        addFunction("mbrtowc","size_t","wchar_t*","char*","size_t","mbstate_t*");
+        addFunction("wcrtomb","size_t","char*","wchar_t","mbstate_t*");
+        addFunction("fgetwc", "wint_t","FILE*");
+        addFunction("fputwc", "wint_t","wchar_t","FILE*");
+        addFunction("fgetws", "wchar_t*","wchar_t*","int","FILE*");
+        addFunction("fputws", "int","wchar_t*","FILE*");
+        addFunction("wcstol", "long","wchar_t*","wchar_t**","int");
+        addFunction("wcstoul","unsigned long","wchar_t*","wchar_t**","int");
+        addFunction("wcstod", "double","wchar_t*","wchar_t**");
+
+        addTypedef("wint_t",     "unsigned int");
+        addTypedef("mbstate_t",  "struct mbstate");
+
+        // wctype.h
+        addFunction("iswalnum", "int","wint_t");
+        addFunction("iswalpha", "int","wint_t");
+        addFunction("iswblank", "int","wint_t");
+        addFunction("iswcntrl", "int","wint_t");
+        addFunction("iswdigit", "int","wint_t");
+        addFunction("iswgraph", "int","wint_t");
+        addFunction("iswlower", "int","wint_t");
+        addFunction("iswprint", "int","wint_t");
+        addFunction("iswpunct", "int","wint_t");
+        addFunction("iswspace", "int","wint_t");
+        addFunction("iswupper", "int","wint_t");
+        addFunction("iswxdigit","int","wint_t");
+        addFunction("towlower", "wint_t","wint_t");
+        addFunction("towupper", "wint_t","wint_t");
+
+        // err.h (BSD / glibc)
+        addFunction("err",  "void","int","char*","...");
+        addFunction("errx", "void","int","char*","...");
+        addFunction("warn", "void","char*","...");
+        addFunction("warnx","void","char*","...");
     }
     
     private void addFunction(String name, String returnType, String... paramTypes) {

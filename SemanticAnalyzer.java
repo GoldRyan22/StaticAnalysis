@@ -344,8 +344,10 @@ public class SemanticAnalyzer {
         Symbol funcSymbol = symbolTable.lookup(node.name);
         
         if (funcSymbol == null) {
-            addError("Function '" + node.name + "' not declared");
-            return;
+            // Undeclared functions are typical in multi-file projects (defined in other .c
+            // files, declared in headers that weren't fully resolved). Warn, don't error.
+            addWarning("Function '" + node.name + "' not declared (may be external)");
+            return; // Skip argument checking — we have no signature to validate against
         }
         
         if (!funcSymbol.kind.equals("function")) {
@@ -400,9 +402,14 @@ public class SemanticAnalyzer {
             IdNode id = (IdNode) node;
             Symbol symbol = symbolTable.lookup(id.name);
             if (symbol != null) {
+                // A function name used as a value (e.g. passed as callback) should
+                // resolve to a function-pointer type, not its return type.
+                if ("function".equals(symbol.kind)) return "function_ptr";
                 return symbol.type != null ? symbol.type : "unknown";
             }
-            addError("Variable '" + id.name + "' not declared");
+            // Undeclared identifiers are common in multi-file projects (globals, macros,
+            // constants defined in other translation units). Report as warning, not error.
+            addWarning("Variable '" + id.name + "' not declared (may be external/macro)");
             return "unknown";
         }
         else if (node instanceof BinaryExprNode) {
@@ -420,7 +427,20 @@ public class SemanticAnalyzer {
             String rightType = inferType(binExpr.right);
             if (leftType == null) leftType = "unknown";
             if (rightType == null) rightType = "unknown";
-            
+
+            // Propagate unknown to prevent cascading false positives.
+            // e.g. server.db[i] — if server is undeclared, the subscript result
+            // should also be unknown, not degrade to int.
+            if (leftType.equals("unknown") || rightType.equals("unknown")) return "unknown";
+
+            // Array subscript a[i]: deref one pointer level — T**[i] -> T*, T*[i] -> T
+            if (binExpr.operator.equals("[")) {
+                if (leftType.contains("*")) {
+                    return leftType.replaceFirst("\\s*\\*", "").trim();
+                }
+                return leftType;
+            }
+
             // Pointer arithmetic
             if (leftType.contains("*")) return leftType;
             if (rightType.contains("*")) return rightType;
@@ -451,7 +471,10 @@ public class SemanticAnalyzer {
                 return exprType;
             }
             if (unaryExpr.operator.equals("&")) {
-                // Address-of: add pointer level
+                // Address-of: add pointer level.
+                // If the base type is already unknown, keep it as unknown rather
+                // than producing "unknown*" which bypasses the unknown-compatibility check.
+                if (exprType.equals("unknown")) return "unknown";
                 return exprType + "*";
             }
             
@@ -604,14 +627,61 @@ public class SemanticAnalyzer {
         
         
         
+        // const-qualification: const char* and char* are compatible
+        String strippedExpected = resolvedExpected.replaceAll("\\bconst\\b\\s*", "").trim();
+        String strippedActual   = resolvedActual  .replaceAll("\\bconst\\b\\s*", "").trim();
+        if (strippedExpected.equals(strippedActual)) return true;
+
         // Pointer compatibility
         if (resolvedExpected.contains("*") && resolvedActual.contains("*")) {
             // void* is compatible with any pointer
             if (resolvedExpected.startsWith("void*") || resolvedActual.startsWith("void*")) {
                 return true;
             }
+            // unknown* is compatible with any pointer (unresolved type from external symbol)
+            if (resolvedExpected.startsWith("unknown") || resolvedActual.startsWith("unknown")) {
+                return true;
+            }
+            // Strip const and compare base pointer types
+            if (strippedExpected.equals(strippedActual)) return true;
+        }
+
+        // Array type T[] decays to pointer T* in C (e.g. ChannelSpecs[] ≡ ChannelSpecs*)
+        if (resolvedExpected.contains("*") && resolvedActual.contains("[")) {
+            String baseExpected = resolvedExpected.replaceAll("\\s*\\*+\\s*", "").trim();
+            String baseActual   = resolvedActual.replaceAll("\\s*\\[.*?\\]\\s*", "").trim();
+            if (baseExpected.equals(baseActual)) return true;
+        }
+
+        // unsigned long long / long long are assignment-compatible
+        if ((resolvedExpected.equals("long long") && resolvedActual.equals("unsigned long long")) ||
+            (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("long long"))) {
+            return true;
         }
         
+        // A function name used as a value is compatible with any function-pointer parameter
+        if (resolvedActual.equals("function_ptr") && resolvedExpected.contains("*")) return true;
+
+        // Same-base-type compatibility: T vs T*, T vs T[], T* vs T[], T vs T[N]
+        // This handles array decay and cases where the analyzer over-qualifies types.
+        {
+            String baseExp = resolvedExpected.replaceAll("\\bconst\\b", "").replaceAll("\\bstruct\\b", "")
+                .replaceAll("\\s*\\*+\\s*", "").replaceAll("\\s*\\[.*?\\]\\s*", "").trim();
+            String baseAct = resolvedActual.replaceAll("\\bconst\\b", "").replaceAll("\\bstruct\\b", "")
+                .replaceAll("\\s*\\*+\\s*", "").replaceAll("\\s*\\[.*?\\]\\s*", "").trim();
+            // Only apply to non-trivial named types (not primitives, not empty)
+            if (!baseExp.isEmpty() && !baseAct.isEmpty() && baseExp.equals(baseAct)
+                    && !baseExp.equals("int") && !baseExp.equals("char")
+                    && !baseExp.equals("void") && !baseExp.equals("long")
+                    && !baseExp.equals("double") && !baseExp.equals("float")
+                    && !baseExp.equals("short") && !baseExp.equals("unsigned")) {
+                // One side has pointer/array qualifier and the other doesn't (or they differ) — allow
+                boolean expHasQual = resolvedExpected.contains("*") || resolvedExpected.contains("[");
+                boolean actHasQual = resolvedActual.contains("*")  || resolvedActual.contains("[");
+                if (expHasQual || actHasQual) return true;
+            }
+        }
+
         // Allow integer literal 0 (NULL) to be assigned/returned to any pointer type
         if (resolvedExpected.contains("*") && resolvedActual.equals("int")) return true;
         
@@ -636,13 +706,22 @@ public class SemanticAnalyzer {
             int ptrIdx = resolved.indexOf('*');
             String basePart = (ptrIdx >= 0 ? resolved.substring(0, ptrIdx) : resolved).trim();
             String ptrSuffix = (ptrIdx >= 0 ? resolved.substring(ptrIdx) : "");
+
+            // Also strip array suffix e.g. T[N] -> base=T, arraySuffix=[N]
+            // so that size_t[CLUSTER_SLOTS] resolves the same as size_t
+            String arraySuffix = "";
+            int arrIdx = basePart.indexOf('[');
+            if (arrIdx >= 0) {
+                arraySuffix = basePart.substring(arrIdx);
+                basePart = basePart.substring(0, arrIdx).trim();
+            }
             
             // Remove "struct" keyword before looking up
             String lookupKey = basePart.replaceFirst("^struct\\s+", "").trim();
             
             Symbol symbol = symbolTable.lookupTypedef(lookupKey);
             if (symbol != null) {
-                resolved = symbol.type + ptrSuffix;
+                resolved = symbol.type + arraySuffix + ptrSuffix;
                 depth++;
             } else {
                 break;

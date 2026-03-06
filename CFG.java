@@ -125,8 +125,14 @@ class ControlFlowGraph {
         }
         
         for (CFGNode node : allNodes) {
-            for (CFGNode succ : node.successors) {
-                sb.append("  Node").append(node.id).append(" -> Node").append(succ.id).append(";\n");
+            for (int i = 0; i < node.successors.size(); i++) {
+                CFGNode succ = node.successors.get(i);
+                sb.append("  Node").append(node.id).append(" -> Node").append(succ.id);
+                if (node.successors.size() > 1) {
+                    String edgeLabel = (i == 0) ? "true" : "false";
+                    sb.append(" [label=\"").append(edgeLabel).append("\"]");
+                }
+                sb.append(";\n");
             }
         }
         

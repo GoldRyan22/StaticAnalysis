@@ -10,6 +10,8 @@ import subprocess
 import threading
 import glob
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -490,59 +492,94 @@ class AnalysisPanel(ctk.CTkFrame):
             else:
                 self.app.log_message("   ✓ Already compiled")
 
-            combined_sections = []
-            errors_total = warnings_total = 0
-            original_dir = os.getcwd()
+            NUM_THREADS = 4
+            if len(c_files) > 12:
+                # ── Parallel path ──────────────────────────────────────────
+                self.app.log_message(f"\n🚀 Parallel analysis — {NUM_THREADS} threads")
+                indexed = list(enumerate(c_files, 1))
+                base = len(indexed) // NUM_THREADS
+                chunks = [indexed[i * base:(i + 1) * base] for i in range(NUM_THREADS - 1)]
+                chunks.append(indexed[(NUM_THREADS - 1) * base:])  # last thread gets the remainder
 
-            for idx, c_file in enumerate(c_files, 1):
-                self.app.log_message(f"\n[{idx}/{len(c_files)}] 🔍 {c_file.name}")
-                try:
-                    os.chdir(script_dir)
-                    result = subprocess.run(
-                        ['java', 'Main', str(c_file), '--all'],
-                        capture_output=True, text=True, timeout=60
+                lock = threading.Lock()
+                par_results = []  # list of (idx, section, errors, warnings)
+
+                threads = [
+                    threading.Thread(
+                        target=self._analyze_chunk,
+                        args=(chunk, len(c_files), script_dir, lock, par_results),
+                        daemon=True
                     )
+                    for chunk in chunks if chunk
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
 
-                    stderr_block = ""
-                    if result.stderr and result.stderr.strip():
-                        stderr_block = "\n--- ERRORS / WARNINGS ---\n" + result.stderr.strip() + "\n"
+                par_results.sort(key=lambda r: r[0])
+                combined_sections = [r[1] for r in par_results]
+                errors_total   = sum(r[2] for r in par_results)
+                warnings_total = sum(r[3] for r in par_results)
+            else:
+                # ── Sequential path ────────────────────────────────────────
+                combined_sections = []
+                errors_total = warnings_total = 0
+                original_dir = os.getcwd()
 
-                    section = (
-                        f"{'═' * 60}\n"
-                        f"  FILE: {c_file.name}\n"
-                        f"{'═' * 60}\n"
-                        + (result.stdout or "(no stdout output)\n")
-                        + stderr_block
-                        + "\n"
-                    )
-                    combined_sections.append(section)
+                for idx, c_file in enumerate(c_files, 1):
+                    self.app.log_message(f"\n[{idx}/{len(c_files)}] 🔍 {c_file.name}")
+                    try:
+                        os.chdir(script_dir)
+                        result = subprocess.run(
+                            ['java', 'Main', str(c_file), '--all'],
+                            capture_output=True, text=True, timeout=60
+                        )
 
-                    # Count summary numbers
-                    m = re.search(r'(\d+) error.*?(\d+) warning', result.stdout or '')
-                    if m:
-                        errors_total   += int(m.group(1))
-                        warnings_total += int(m.group(2))
+                        stderr_block = ""
+                        if result.stderr and result.stderr.strip():
+                            stderr_block = "\n--- ERRORS / WARNINGS ---\n" + result.stderr.strip() + "\n"
 
-                    # Move CFG files, prefixed with the source file stem
-                    stem = c_file.stem
-                    moved = 0
-                    for pattern in ['cfg_*.dot', 'cfg_*.png']:
-                        for f in glob.glob(pattern):
-                            basename = os.path.basename(f)
-                            dest = os.path.join(self.output_dir, f"{stem}__{basename}")
-                            os.rename(f, dest)
-                            moved += 1
+                        section = (
+                            f"{'═' * 60}\n"
+                            f"  FILE: {c_file.name}\n"
+                            f"{'═' * 60}\n"
+                            + (result.stdout or "(no stdout output)\n")
+                            + stderr_block
+                            + "\n"
+                        )
+                        combined_sections.append(section)
 
-                    self.app.log_message(f"   ✓ Done ({moved} CFG file(s) saved)")
+                        m = re.search(r'(\d+) error.*?(\d+) warning', result.stdout or '')
+                        if m:
+                            errors_total   += int(m.group(1))
+                            warnings_total += int(m.group(2))
 
-                except subprocess.TimeoutExpired:
-                    combined_sections.append(f"FILE: {c_file.name}\n❌ Timed out\n\n")
-                    self.app.log_message(f"   ⚠ Timed out")
-                except Exception as e:
-                    combined_sections.append(f"FILE: {c_file.name}\n❌ Error: {e}\n\n")
-                    self.app.log_message(f"   ❌ Error: {e}")
-                finally:
-                    os.chdir(original_dir)
+                        stem = c_file.stem
+                        moved = 0
+                        for pattern in ['cfg_*.dot', 'cfg_*.png']:
+                            for f in glob.glob(pattern):
+                                basename = os.path.basename(f)
+                                dest = os.path.join(self.output_dir, f"{stem}__{basename}")
+                                if os.path.exists(dest):
+                                    name, ext = os.path.splitext(f"{stem}__{basename}")
+                                    counter = 2
+                                    while os.path.exists(dest):
+                                        dest = os.path.join(self.output_dir, f"{name}_{counter}{ext}")
+                                        counter += 1
+                                os.rename(f, dest)
+                                moved += 1
+
+                        self.app.log_message(f"   ✓ Done ({moved} CFG file(s) saved)")
+
+                    except subprocess.TimeoutExpired:
+                        combined_sections.append(f"FILE: {c_file.name}\n❌ Timed out\n\n")
+                        self.app.log_message(f"   ⚠ Timed out")
+                    except Exception as e:
+                        combined_sections.append(f"FILE: {c_file.name}\n❌ Error: {e}\n\n")
+                        self.app.log_message(f"   ❌ Error: {e}")
+                    finally:
+                        os.chdir(original_dir)
 
             # Write combined report
             header = (
@@ -572,6 +609,69 @@ class AnalysisPanel(ctk.CTkFrame):
         finally:
             self.app.after(0, self.finish_analysis)
 
+    def _analyze_one_file(self, c_file, idx, total, script_dir, lock, results):
+        """Analyze a single .c file in an isolated temp dir (thread-safe)."""
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                result = subprocess.run(
+                    ['java', '-cp', script_dir, 'Main', str(c_file.resolve()), '--all'],
+                    capture_output=True, text=True, timeout=60, cwd=tmpdir
+                )
+
+                stderr_block = ""
+                if result.stderr and result.stderr.strip():
+                    stderr_block = "\n--- ERRORS / WARNINGS ---\n" + result.stderr.strip() + "\n"
+
+                section = (
+                    f"{'═' * 60}\n"
+                    f"  FILE: {c_file.name}\n"
+                    f"{'═' * 60}\n"
+                    + (result.stdout or "(no stdout output)\n")
+                    + stderr_block
+                    + "\n"
+                )
+
+                errors = warnings = 0
+                m = re.search(r'(\d+) error.*?(\d+) warning', result.stdout or '')
+                if m:
+                    errors   = int(m.group(1))
+                    warnings = int(m.group(2))
+
+                # Move CFG files to shared output_dir under a lock to avoid races
+                stem = c_file.stem
+                moved = 0
+                with lock:
+                    for pattern in ['cfg_*.dot', 'cfg_*.png']:
+                        for f in glob.glob(os.path.join(tmpdir, pattern)):
+                            basename = os.path.basename(f)
+                            dest = os.path.join(self.output_dir, f"{stem}__{basename}")
+                            if os.path.exists(dest):
+                                name, ext = os.path.splitext(f"{stem}__{basename}")
+                                counter = 2
+                                while os.path.exists(dest):
+                                    dest = os.path.join(self.output_dir, f"{name}_{counter}{ext}")
+                                    counter += 1
+                            shutil.move(f, dest)
+                            moved += 1
+
+                with lock:
+                    results.append((idx, section, errors, warnings))
+                self.app.log_message(f"   [{idx}/{total}] ✓ {c_file.name} ({moved} CFG file(s))")
+
+        except subprocess.TimeoutExpired:
+            with lock:
+                results.append((idx, f"FILE: {c_file.name}\n❌ Timed out\n\n", 0, 0))
+            self.app.log_message(f"   [{idx}/{total}] ⚠ {c_file.name} — Timed out")
+        except Exception as e:
+            with lock:
+                results.append((idx, f"FILE: {c_file.name}\n❌ Error: {e}\n\n", 0, 0))
+            self.app.log_message(f"   [{idx}/{total}] ❌ {c_file.name} — {e}")
+
+    def _analyze_chunk(self, chunk, total, script_dir, lock, results):
+        """Process a list of (idx, c_file) pairs sequentially (runs in a worker thread)."""
+        for idx, c_file in chunk:
+            self._analyze_one_file(c_file, idx, total, script_dir, lock, results)
+
 
 class ResultsPanel(ctk.CTkFrame):
     """Right panel for viewing results"""
@@ -585,6 +685,10 @@ class ResultsPanel(ctk.CTkFrame):
         self.current_image = None
         self.photo = None
         self.zoom_level = 1.0
+        self._file_sections = {}
+        self._all_report_text = ""
+        self._all_cfg_data = []  # list of (png_path, func_name, source_stem)
+        self._cfg_filter_job = None  # debounce timer id
         
         self.setup_ui()
     
@@ -629,7 +733,34 @@ class ResultsPanel(ctk.CTkFrame):
         ctk.CTkLabel(left_header, text="📊 Static Analysis Results",
                     font=ctk.CTkFont(size=12, weight="bold"),
                     text_color=COLORS["text_bright"]).pack(side="left", padx=10, pady=6)
-        
+
+        # File filter bar
+        filter_frame = ctk.CTkFrame(left_report_frame, fg_color="transparent", height=34)
+        filter_frame.pack(fill="x", padx=8, pady=(0, 4))
+        filter_frame.pack_propagate(False)
+
+        ctk.CTkLabel(filter_frame, text="File:",
+                    font=ctk.CTkFont(size=11),
+                    text_color=COLORS["text"]).pack(side="left", padx=(2, 6))
+
+        self.file_filter_var = ctk.StringVar(value="All Files")
+        self.file_filter_combo = ctk.CTkComboBox(
+            filter_frame, width=220, height=26,
+            variable=self.file_filter_var,
+            values=["All Files"],
+            font=ctk.CTkFont(size=11),
+            command=self._filter_report
+        )
+        self.file_filter_combo.pack(side="left", padx=(0, 8))
+
+        self.file_search_entry = ctk.CTkEntry(
+            filter_frame, width=150, height=26,
+            placeholder_text="search files...",
+            font=ctk.CTkFont(size=11)
+        )
+        self.file_search_entry.pack(side="left")
+        self.file_search_entry.bind("<KeyRelease>", self._on_filter_search)
+
         self.report_text = ctk.CTkTextbox(left_report_frame, 
                                           font=ctk.CTkFont(family="Consolas", size=11),
                                           fg_color=COLORS["bg_dark"],
@@ -715,12 +846,36 @@ class ResultsPanel(ctk.CTkFrame):
         left_panel.pack_propagate(False)
         
         # List header
-        self.cfg_label = ctk.CTkLabel(left_panel, 
+        self.cfg_label = ctk.CTkLabel(left_panel,
                                       text="📋 Functions",
                                       font=ctk.CTkFont(size=12, weight="bold"),
                                       text_color=COLORS["text_bright"])
-        self.cfg_label.pack(pady=8, padx=5)
-        
+        self.cfg_label.pack(pady=(8, 4), padx=5)
+
+        # File filter search entry
+        ctk.CTkLabel(left_panel, text="File filter:",
+                    font=ctk.CTkFont(size=10),
+                    text_color=COLORS["text"]).pack(padx=7, pady=(0, 1), anchor="w")
+        self.cfg_file_search = ctk.CTkEntry(
+            left_panel, height=26,
+            placeholder_text="filter by file...",
+            font=ctk.CTkFont(size=11)
+        )
+        self.cfg_file_search.pack(padx=5, pady=(0, 4), fill="x")
+        self.cfg_file_search.bind("<KeyRelease>", lambda _: self._schedule_cfg_filter())
+
+        # Function search entry
+        ctk.CTkLabel(left_panel, text="Function search:",
+                    font=ctk.CTkFont(size=10),
+                    text_color=COLORS["text"]).pack(padx=7, pady=(0, 1), anchor="w")
+        self.cfg_search_entry = ctk.CTkEntry(
+            left_panel, height=26,
+            placeholder_text="search function...",
+            font=ctk.CTkFont(size=11)
+        )
+        self.cfg_search_entry.pack(padx=5, pady=(0, 6), fill="x")
+        self.cfg_search_entry.bind("<KeyRelease>", lambda _: self._schedule_cfg_filter())
+
         # Scrollable function list (vertical)
         self.cfg_gallery = ModernScrollableFrame(left_panel)
         self.cfg_gallery.pack(fill="both", expand=True, padx=5, pady=(0, 5))
@@ -810,59 +965,152 @@ class ResultsPanel(ctk.CTkFrame):
     
     def load_results(self, directory):
         self.results_dir = directory
-        
+
         # Clear thumbnails
         for thumb in self.cfg_thumbnails:
             thumb.destroy()
         self.cfg_thumbnails.clear()
-        
+
         # Load report
         report_file = os.path.join(directory, 'analysis_report.txt')
         self.report_text.delete("1.0", "end")
-        
+
         if os.path.exists(report_file):
             with open(report_file, 'r') as f:
-                self.report_text.insert("1.0", f.read())
+                self._all_report_text = f.read()
+            self._build_file_sections()
+            self.report_text.insert("1.0", self._all_report_text)
             self.app.log_message(f"📄 Loaded report from {directory}")
         else:
-            self.report_text.insert("1.0", "No analysis_report.txt found in this directory.")
-        
-        # Load CFG images — support both single-file (cfg_func.png)
-        # and folder-analysis (stem__cfg_func.png) naming conventions
-        single_pngs = sorted(Path(directory).glob("cfg_*.png"))
-        folder_pngs = sorted(Path(directory).glob("*__cfg_*.png"))
-        png_files = folder_pngs if folder_pngs else single_pngs
-        
-        if png_files:
-            self.cfg_label.configure(text=f"📋 Functions ({len(png_files)})")
-            
-            for png_path in png_files:
-                # Folder-analysis prefix:  stem__cfg_funcname.png
-                m_folder = re.match(r'(.+?)__cfg_(.+)\.png', png_path.name)
-                if m_folder:
-                    func_name = f"{m_folder.group(1)}: {m_folder.group(2)}"
-                else:
-                    # Single-file:  cfg_funcname.png
-                    m_single = re.match(r'cfg_(.+)\.png', png_path.name)
-                    func_name = m_single.group(1) if m_single else png_path.stem
-                
-                item = CFGListItem(self.cfg_gallery, str(png_path), func_name,
-                                   self.on_cfg_item_click)
-                item.pack(fill="x", pady=2)
-                self.cfg_thumbnails.append(item)
-            
-            # Select first
-            if self.cfg_thumbnails:
-                self.on_cfg_item_click(self.cfg_thumbnails[0])
+            self._all_report_text = "No analysis_report.txt found in this directory."
+            self._file_sections = {}
+            self.report_text.insert("1.0", self._all_report_text)
+
+        # Update file filter combo
+        file_choices = ["All Files"] + sorted(self._file_sections.keys())
+        self.file_filter_combo.configure(values=file_choices)
+        self.file_filter_var.set("All Files")
+        self.file_search_entry.delete(0, "end")
+
+        # Load CFG images — support stem__cfg_func.png (folder) and cfg_func.png (single)
+        self._all_cfg_data = []
+        all_stems = set()
+
+        for png_path in sorted(Path(directory).glob("*.png")):
+            m_folder = re.match(r'(.+?)__cfg_(.+)\.png', png_path.name)
+            m_single = re.match(r'cfg_(.+)\.png', png_path.name)
+            if m_folder:
+                stem = m_folder.group(1)
+                func_name = m_folder.group(2)
+                all_stems.add(stem)
+            elif m_single:
+                stem = ""
+                func_name = m_single.group(1)
+            else:
+                continue
+            self._all_cfg_data.append((str(png_path), func_name, stem))
+
+        # Populate file dropdown
+        self.cfg_file_search.delete(0, "end")
+        self.cfg_search_entry.delete(0, "end")
+
+        self._apply_cfg_filters(auto_select_first=True)
+
+    def _build_file_sections(self):
+        """Parse the combined report into per-file sections."""
+        self._file_sections = {}
+        if not self._all_report_text:
+            return
+        # Match section headers: ═══...═══ / FILE: name.c / ═══...═══
+        pattern = re.compile(
+            r'[═]{30,}\n\s*FILE:\s*(.+?)\s*\n[═]{30,}',
+            re.MULTILINE
+        )
+        matches = list(pattern.finditer(self._all_report_text))
+        if not matches:
+            return
+        for i, m in enumerate(matches):
+            filename = m.group(1).strip()
+            start = m.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(self._all_report_text)
+            self._file_sections[filename] = self._all_report_text[start:end]
+
+    def _filter_report(self, value=None):
+        """Update report textbox to show the selected file section."""
+        selected = self.file_filter_var.get()
+        self.report_text.delete("1.0", "end")
+        if selected == "All Files" or selected not in self._file_sections:
+            self.report_text.insert("1.0", self._all_report_text or "No report loaded.")
         else:
-            self.cfg_label.configure(text="No CFG images found")
+            self.report_text.insert("1.0", self._file_sections[selected])
+
+    def _on_filter_search(self, event=None):
+        """Filter the file dropdown options based on search entry text."""
+        query = self.file_search_entry.get().lower()
+        all_keys = sorted(self._file_sections.keys())
+        if query:
+            filtered = ["All Files"] + [f for f in all_keys if query in f.lower()]
+        else:
+            filtered = ["All Files"] + all_keys
+        self.file_filter_combo.configure(values=filtered)
     
+    def _schedule_cfg_filter(self):
+        """Debounce: cancel any pending rebuild and schedule a new one in 400 ms."""
+        if self._cfg_filter_job is not None:
+            self.after_cancel(self._cfg_filter_job)
+        self._cfg_filter_job = self.after(400, self._apply_cfg_filters)
+
+    def _apply_cfg_filters(self, auto_select_first=False):
+        """Re-populate the CFG list based on active file filter and function search text."""
+        self._cfg_filter_job = None
+        MAX_ITEMS = 150
+
+        file_query = self.cfg_file_search.get().lower().strip()
+        func_query = self.cfg_search_entry.get().lower().strip()
+
+        # Destroy existing list items
+        for thumb in self.cfg_thumbnails:
+            thumb.destroy()
+        self.cfg_thumbnails.clear()
+
+        # Collect matching entries without building widgets yet
+        matches = []
+        for png_path, func_name, stem in self._all_cfg_data:
+            if file_query and file_query not in stem.lower():
+                continue
+            if func_query and func_query not in func_name.lower():
+                continue
+            matches.append((png_path, func_name, stem))
+
+        total = len(matches)
+        visible = matches[:MAX_ITEMS]
+
+        for png_path, func_name, stem in visible:
+            display = f"{stem}: {func_name}" if stem else func_name
+            item = CFGListItem(self.cfg_gallery, png_path, display,
+                               self.on_cfg_item_click)
+            item.pack(fill="x", pady=2)
+            self.cfg_thumbnails.append(item)
+
+        hidden = total - len(visible)
+        if hidden > 0:
+            self.cfg_label.configure(
+                text=f"📋 Functions ({len(visible)} shown, {hidden} hidden — refine filter)"
+            )
+        else:
+            self.cfg_label.configure(text=f"📋 Functions ({total})")
+
+        if auto_select_first and self.cfg_thumbnails:
+            self.on_cfg_item_click(self.cfg_thumbnails[0])
+        elif not self.cfg_thumbnails:
+            self.cfg_name_label.configure(text="No matching functions")
+
     def on_cfg_item_click(self, item):
         # Deselect all
         for t in self.cfg_thumbnails:
             t.set_selected(False)
         item.set_selected(True)
-        
+
         self.load_cfg_image(item.image_path, item.function_name)
     
     def load_cfg_image(self, path, name):
