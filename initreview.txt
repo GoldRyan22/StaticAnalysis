@@ -54,6 +54,13 @@ Type compatibility issues between different integer types
 These are primarily static analysis limitations rather than actual code errors, as the Redis codebase is production-quality.
 
 
+cd /home/uiv21850/projects/java/StaticAnalysis && \
+grep -B 2 "Cyclomatic Complexity:" resultspls/analysis_report.txt | \
+awk '/Control Flow Graph for:/ {fn=$6} /Cyclomatic Complexity:/ {print $3, fn}' | \
+sort -rn | \
+head -10 | \
+awk '{print NR". "$2" - Complexity: "$1}'
+
 TOP 5 MOST COMPLEX FUNCTIONS (by Cyclomatic Complexity)
 Rank	Function Name	Complexity	Risk Level
 1	hotkeysCommand	58	Very High
