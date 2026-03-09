@@ -52,3 +52,32 @@ Incomplete struct definitions (most errors)
 External function declarations not resolved
 Type compatibility issues between different integer types
 These are primarily static analysis limitations rather than actual code errors, as the Redis codebase is production-quality.
+
+
+TOP 5 MOST COMPLEX FUNCTIONS (by Cyclomatic Complexity)
+Rank	Function Name	Complexity	Risk Level
+1	hotkeysCommand	58	Very High
+2	bitfieldGeneric	36	High
+3	bitposCommand	34	High
+4	raxSeek	34	High
+5	streamValidateListpackIntegrity	34	High
+Key Insights:
+hotkeysCommand is by far the most complex function with a cyclomatic complexity of 58 - significantly higher than the average of 3.11
+
+Average complexity across 2,184 analyzed functions is very low (3.11), indicating generally well-structured code
+
+Distribution breakdown:
+
+87.1% of functions have complexity 1-5 (Low risk)
+9.3% have complexity 6-10 (Low-Moderate risk)
+2.5% have complexity 11-20 (Moderate risk)
+1.0% have complexity 21-50 (High risk)
+Only 1 function (0.05%) has complexity > 50 (Very High risk)
+These high-complexity functions likely handle:
+
+hotkeysCommand: Command processing with many conditional branches
+bitfieldGeneric/bitposCommand: Bit manipulation operations
+raxSeek: Radix tree traversal logic
+streamValidateListpackIntegrity: Data structure validation
+Functions with complexity > 20 should be considered candidates for refactoring to improve maintainability and testability.
+
