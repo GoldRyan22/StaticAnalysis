@@ -172,6 +172,8 @@ class AliasEntry {
     Set<String> pointsTo; // Set of variable names this pointer might point to
     boolean isDangling;
     boolean isVoid;
+    boolean isFreed;           // pointer was explicitly free()'d
+    boolean isHeapAllocated;   // pointer owns heap memory (malloc/calloc/...)
     int scopeLevel;
     
     public AliasEntry(String pointerName, int scopeLevel) {
@@ -179,6 +181,8 @@ class AliasEntry {
         this.pointsTo = new HashSet<>();
         this.isDangling = false;
         this.isVoid = false;
+        this.isFreed = false;
+        this.isHeapAllocated = false;
         this.scopeLevel = scopeLevel;
     }
     
@@ -197,14 +201,16 @@ class AliasEntry {
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("%-15s -> [", pointerName));
-        sb.append(String.join(", ", pointsTo));
+        if (isHeapAllocated && pointsTo.isEmpty()) {
+            sb.append("heap");
+        } else {
+            sb.append(String.join(", ", pointsTo));
+        }
         sb.append("]");
-        if (isDangling) {
-            sb.append(" DANGLING!");
-        }
-        if (isVoid) {
-            sb.append(" VOID_PTR");
-        }
+        if (isFreed)      sb.append(" FREED!");
+        else if (isDangling) sb.append(" DANGLING!");
+        if (isVoid)       sb.append(" VOID_PTR");
+        if (isHeapAllocated && !isFreed) sb.append(" heap-owned");
         return sb.toString();
     }
 }
@@ -214,11 +220,17 @@ class AliasTable {
     private Map<String, AliasEntry> aliases;
     private List<String> danglingPointers;
     private List<String> voidPointerCalls;
+    private List<String> useAfterFree;   // use-after-free violations
+    private List<String> doubleFree;     // double-free violations
+    private List<String> memoryLeaks;    // leaked heap allocations
     
     public AliasTable() {
         this.aliases = new HashMap<>();
         this.danglingPointers = new ArrayList<>();
         this.voidPointerCalls = new ArrayList<>();
+        this.useAfterFree = new ArrayList<>();
+        this.doubleFree = new ArrayList<>();
+        this.memoryLeaks = new ArrayList<>();
     }
     
     public void addPointer(String pointerName, int scopeLevel) {
@@ -232,6 +244,9 @@ class AliasTable {
             aliases.put(pointerName, new AliasEntry(pointerName, 0));
         }
         aliases.get(pointerName).addAlias(targetName);
+        // Reassigning clears freed/dangling state — pointer now points somewhere new
+        aliases.get(pointerName).isDangling = false;
+        aliases.get(pointerName).isFreed = false;
     }
     
     public void removeAlias(String pointerName, String targetName) {
@@ -243,6 +258,64 @@ class AliasTable {
         }
     }
     
+    /** Mark pointer as owning heap memory (result of malloc/calloc/etc.) */
+    public void markHeapAllocated(String pointerName, int scopeLevel) {
+        if (!aliases.containsKey(pointerName)) {
+            aliases.put(pointerName, new AliasEntry(pointerName, scopeLevel));
+        }
+        AliasEntry entry = aliases.get(pointerName);
+        entry.isHeapAllocated = true;
+        entry.isFreed = false;
+        entry.isDangling = false;
+        entry.pointsTo.clear(); // now points to heap, not a named var
+    }
+    
+    /** Called when free(ptr) — marks pointer as freed/dangling. */
+    public boolean markFreed(String pointerName) {
+        if (!aliases.containsKey(pointerName)) {
+            aliases.put(pointerName, new AliasEntry(pointerName, 0));
+        }
+        AliasEntry entry = aliases.get(pointerName);
+        if (entry.isFreed) {
+            doubleFree.add(pointerName);
+            return false; // double-free detected
+        }
+        entry.isFreed = true;
+        entry.isDangling = true;
+        entry.isHeapAllocated = false; // no longer owns heap memory
+        entry.pointsTo.clear();
+        return true;
+    }
+    
+    /** Returns true if pointer was already freed. */
+    public boolean isFreed(String pointerName) {
+        return aliases.containsKey(pointerName) && aliases.get(pointerName).isFreed;
+    }
+    
+    /** Returns true if pointer owns heap memory (malloc'd but not freed). */
+    public boolean isHeapAllocated(String pointerName) {
+        return aliases.containsKey(pointerName) && aliases.get(pointerName).isHeapAllocated;
+    }
+    
+    /** Returns a snapshot of all heap-owning (unfreed) pointer names. */
+    public Set<String> getHeapAllocated() {
+        Set<String> result = new HashSet<>();
+        for (AliasEntry entry : aliases.values()) {
+            if (entry.isHeapAllocated) result.add(entry.pointerName);
+        }
+        return result;
+    }
+    
+    /** Record a memory leak for display. */
+    public void recordLeak(String description) {
+        memoryLeaks.add(description);
+    }
+    
+    /** Record a use-after-free for display. */
+    public void recordUseAfterFree(String description) {
+        useAfterFree.add(description);
+    }
+    
     public void markVoidPointer(String pointerName) {
         if (aliases.containsKey(pointerName)) {
             aliases.get(pointerName).isVoid = true;
@@ -252,7 +325,10 @@ class AliasTable {
     public void checkDereference(String pointerName, int line) {
         if (aliases.containsKey(pointerName)) {
             AliasEntry entry = aliases.get(pointerName);
-            if (entry.isDangling) {
+            if (entry.isFreed) {
+                String msg = "'" + pointerName + "'";
+                useAfterFree.add(msg);
+            } else if (entry.isDangling) {
                 danglingPointers.add(pointerName + " at line " + line);
             }
             if (entry.isVoid) {
@@ -268,13 +344,11 @@ class AliasTable {
         return new HashSet<>();
     }
     
-    public List<String> getDanglingPointers() {
-        return danglingPointers;
-    }
-    
-    public List<String> getVoidPointerCalls() {
-        return voidPointerCalls;
-    }
+    public List<String> getDanglingPointers() { return danglingPointers; }
+    public List<String> getVoidPointerCalls() { return voidPointerCalls; }
+    public List<String> getUseAfterFree()     { return useAfterFree; }
+    public List<String> getDoubleFree()       { return doubleFree; }
+    public List<String> getMemoryLeaks()      { return memoryLeaks; }
     
     public void print() {
         System.out.println("\n=== Alias Table ===");
@@ -291,16 +365,23 @@ class AliasTable {
         
         if (!danglingPointers.isEmpty()) {
             System.out.println("\n⚠ DANGLING POINTERS DETECTED:");
-            for (String ptr : danglingPointers) {
-                System.out.println("  - " + ptr);
-            }
+            for (String ptr : danglingPointers) System.out.println("  - " + ptr);
         }
-        
+        if (!useAfterFree.isEmpty()) {
+            System.out.println("\n⚠ USE-AFTER-FREE DETECTED:");
+            for (String s : useAfterFree) System.out.println("  - " + s);
+        }
+        if (!doubleFree.isEmpty()) {
+            System.out.println("\n⚠ DOUBLE-FREE DETECTED:");
+            for (String s : doubleFree) System.out.println("  - " + s);
+        }
+        if (!memoryLeaks.isEmpty()) {
+            System.out.println("\n⚠ MEMORY LEAKS DETECTED:");
+            for (String s : memoryLeaks) System.out.println("  - " + s);
+        }
         if (!voidPointerCalls.isEmpty()) {
             System.out.println("\n⚠ VOID POINTER DEREFERENCES:");
-            for (String call : voidPointerCalls) {
-                System.out.println("  - " + call);
-            }
+            for (String call : voidPointerCalls) System.out.println("  - " + call);
         }
     }
 }

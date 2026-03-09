@@ -14,20 +14,24 @@ public class CustomLibraryResolver {
     private Map<String, String> typedefs;
     private Map<String, CustomStruct> structs;
     private Map<String, Integer> defineConstants;
+    private Map<String, String> externVariables;
     private Set<String> usedFunctions;
     private Set<String> usedTypes;
     private Set<String> processedHeaders;
     private String sourceDirectory;
+    private List<String> extraSearchDirs;
     
     public CustomLibraryResolver(String sourceDirectory) {
         this.functions = new HashMap<>();
         this.typedefs = new HashMap<>();
         this.structs = new HashMap<>();
         this.defineConstants = new HashMap<>();
+        this.externVariables = new HashMap<>();
         this.usedFunctions = new HashSet<>();
         this.usedTypes = new HashSet<>();
         this.processedHeaders = new HashSet<>();
         this.sourceDirectory = sourceDirectory;
+        this.extraSearchDirs = new ArrayList<>();
     }
     
     /**
@@ -109,6 +113,9 @@ public class CustomLibraryResolver {
             // Extract function declarations
             extractFunctionDeclarations(content);
             
+            // Extract extern variable declarations (e.g. extern struct redisServer server;)
+            extractExternDeclarations(content);
+            
             // Extract #define integer constants (e.g. AL_START_HEAD, AL_START_TAIL)
             extractDefines(content);
             
@@ -118,27 +125,94 @@ public class CustomLibraryResolver {
     }
     
     /**
-     * Find header file in source directory or its subdirectories
+     * Register an additional directory to search for header files.
+     * Useful for -I include paths passed on the command line.
+     */
+    public void addSearchDirectory(String dir) {
+        if (dir != null && !dir.isEmpty() && !extraSearchDirs.contains(dir)) {
+            extraSearchDirs.add(dir);
+        }
+    }
+
+    /**
+     * Find header file in source directory, extra search dirs, or their subdirectories.
      */
     private String findHeaderFile(String headerFileName) {
-        // First try the source directory
-        File headerFile = new File(sourceDirectory, headerFileName);
-        if (headerFile.exists()) {
-            return headerFile.getAbsolutePath();
-        }
-        
-        // Try looking in common subdirectories
-        String[] subdirs = {"include", "src", "."};
-        for (String subdir : subdirs) {
-            headerFile = new File(new File(sourceDirectory, subdir), headerFileName);
-            if (headerFile.exists()) {
-                return headerFile.getAbsolutePath();
+        // Collect all candidate root directories: sourceDirectory + extras
+        List<String> searchRoots = new ArrayList<>();
+        searchRoots.add(sourceDirectory);
+        searchRoots.addAll(extraSearchDirs);
+
+        String[] subdirs = {".", "include", "src"};
+        for (String root : searchRoots) {
+            for (String subdir : subdirs) {
+                File dir = subdir.equals(".") ? new File(root) : new File(root, subdir);
+                File candidate = new File(dir, headerFileName);
+                if (candidate.exists()) return candidate.getAbsolutePath();
             }
         }
-        
         return null;
     }
     
+    /**
+     * Extract extern variable declarations from header files.
+     * Pattern: extern [struct/union] type_name [*] var_name [[]...] ;
+     */
+    private void extractExternDeclarations(String content) {
+        Pattern externPattern = Pattern.compile(
+            "^\\s*extern\\s+(.+?)\\s*;",
+            Pattern.MULTILINE
+        );
+        Matcher matcher = externPattern.matcher(content);
+        while (matcher.find()) {
+            String decl = matcher.group(1).trim();
+
+            // Skip function declarations (contain parentheses)
+            if (decl.contains("(")) continue;
+
+            // Tokenize the declaration (e.g. "struct redisServer server" or "int *count")
+            String[] tokens = decl.split("\\s+");
+            if (tokens.length < 2) continue; // need at least type + name
+
+            // Last token is the variable name (may be prefixed with pointer stars)
+            String lastName = tokens[tokens.length - 1];
+            String varName = lastName.replaceAll("^\\*+", "").replaceAll("\\[.*", "").trim();
+            if (!varName.matches("[a-zA-Z_][a-zA-Z0-9_]*")) continue;
+
+            // Build type from all tokens except the last
+            StringBuilder typeBuilder = new StringBuilder();
+            for (int i = 0; i < tokens.length - 1; i++) {
+                if (i > 0) typeBuilder.append(" ");
+                typeBuilder.append(tokens[i]);
+            }
+            // Count pointer stars that were attached to the variable name token
+            int ptrCount = 0;
+            for (char c : lastName.toCharArray()) {
+                if (c == '*') ptrCount++;
+            }
+            String varType = typeBuilder.toString().trim();
+            for (int i = 0; i < ptrCount; i++) {
+                varType += "*";
+            }
+
+            externVariables.put(varName, varType);
+        }
+    }
+
+    /**
+     * Register all extern variables parsed from headers into the symbol table.
+     * These are globally visible variables declared in other translation units.
+     */
+    public void registerExternVariables(SymbolTable symbolTable) {
+        for (Map.Entry<String, String> entry : externVariables.entrySet()) {
+            String name = entry.getKey();
+            String type = entry.getValue();
+            if (symbolTable.lookup(name) == null) {
+                symbolTable.addSymbol(name, type, "variable");
+            }
+        }
+    }
+
     /**
      * Extract simple integer #define constants.
      * Pattern: #define NAME integer_value
@@ -174,12 +248,22 @@ public class CustomLibraryResolver {
      * Remove C-style comments from code
      */
     private String removeComments(String content) {
-        // Remove single-line comments
-        content = content.replaceAll("//.*?$", "");
-        
-        // Remove multi-line comments
-        content = content.replaceAll("/\\*.*?\\*/", "");
-        
+        // IMPORTANT: Block comments MUST be removed before line comments.
+        // If a block comment contains a URL like "https://..." on the line that
+        // also holds the closing "*/", then removing "//" first would delete the
+        // "*/" and the block comment would then span across real code.
+
+        // Remove multi-line comments first ((?s) enables DOTALL so . matches newlines)
+        content = content.replaceAll("(?s)/\\*.*?\\*/", "");
+
+        // Now remove single-line comments safely ((?m) makes $ match end of each line)
+        content = content.replaceAll("(?m)//.*?$", "");
+
+        // Strip GCC __attribute__((...)): remove attribute specifiers so the
+        // function/variable declarations following them can be parsed normally.
+        // e.g. __attribute__((malloc,alloc_size(1),noinline)) void *zmalloc(...);
+        content = content.replaceAll("(?s)__attribute__\\s*\\(\\(.*?\\)\\)", "");
+
         return content;
     }
     
@@ -207,17 +291,34 @@ public class CustomLibraryResolver {
         
         // Struct typedef pattern: typedef struct name { ... } name;
         // or typedef struct { ... } name;
-        Pattern structTypedef = Pattern.compile(
-            "typedef\\s+struct\\s+([a-zA-Z_][a-zA-Z0-9_]*)?\\s*\\{[^}]*\\}\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*;",
+        // Uses manual brace-depth tracking to support nested braces inside the struct body.
+        Pattern structTypedefStart = Pattern.compile(
+            "typedef\\s+struct\\s+([a-zA-Z_][a-zA-Z0-9_]*)?\\s*\\{",
             Pattern.MULTILINE | Pattern.DOTALL
         );
-        
-        matcher = structTypedef.matcher(content);
-        while (matcher.find()) {
-            String structName = matcher.group(1); // may be null
-            String typedefName = matcher.group(2).trim();
-            
-            // If there's a struct name, use it; otherwise use typedef name
+        Matcher stMatcher = structTypedefStart.matcher(content);
+        while (stMatcher.find()) {
+            String structName = stMatcher.group(1); // may be null
+            int openBrace = stMatcher.end() - 1;
+
+            // Balance braces
+            int depth = 0, endPos = -1;
+            for (int i = openBrace; i < content.length(); i++) {
+                char c = content.charAt(i);
+                if (c == '{') depth++;
+                else if (c == '}') { depth--; if (depth == 0) { endPos = i; break; } }
+            }
+            if (endPos == -1) continue;
+
+            // After the closing brace, expect optional whitespace then typedef name then ';'
+            Pattern afterBrace = Pattern.compile(
+                "\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*;",
+                Pattern.MULTILINE | Pattern.DOTALL
+            );
+            Matcher abMatcher = afterBrace.matcher(content.substring(endPos + 1));
+            if (!abMatcher.find() || abMatcher.start() != 0) continue;
+            String typedefName = abMatcher.group(1).trim();
+
             if (structName != null && !structName.trim().isEmpty()) {
                 typedefs.put(typedefName, "struct " + structName.trim());
             } else {
@@ -239,28 +340,51 @@ public class CustomLibraryResolver {
     }
     
     /**
-     * Extract struct definitions
+     * Extract struct definitions.
+     * Uses manual brace-depth tracking so that large structs containing nested
+     * anonymous struct/union fields (e.g. redisServer.inst_metric) are captured
+     * in full instead of stopping at the first inner '}'.
      */
     private void extractStructs(String content) {
-        // Pattern: struct name { fields... };
-        Pattern structPattern = Pattern.compile(
-            "struct\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{([^}]*)\\}",
+        // Match "struct Name {" — just the opening, then balance braces manually
+        Pattern structStart = Pattern.compile(
+            "struct\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
             Pattern.MULTILINE | Pattern.DOTALL
         );
-        
-        Matcher matcher = structPattern.matcher(content);
+
+        Matcher matcher = structStart.matcher(content);
         while (matcher.find()) {
             String structName = matcher.group(1).trim();
-            String fieldsBlock = matcher.group(2).trim();
-            
+            // matcher.end() points one past '{', so the '{' is at matcher.end()-1
+            int openBrace = matcher.end() - 1;
+
+            // Find the matching closing brace by counting depth
+            int depth = 0;
+            int endPos = -1;
+            for (int i = openBrace; i < content.length(); i++) {
+                char c = content.charAt(i);
+                if (c == '{') depth++;
+                else if (c == '}') {
+                    depth--;
+                    if (depth == 0) { endPos = i; break; }
+                }
+            }
+            if (endPos == -1) continue; // unbalanced — skip
+
+            // Strip nested brace blocks so field-level ';' splitting works correctly.
+            // E.g. "struct { int a; int b; } inst_metric[N];" becomes " inst_metric[N];"
+            // preserving the outer field declaration after the anonymous struct.
+            String rawFields = content.substring(openBrace + 1, endPos);
+            String fieldsBlock = stripNestedBraces(rawFields).trim();
+
             CustomStruct struct = new CustomStruct(structName);
-            
+
             // Parse fields - split by semicolon
             String[] lines = fieldsBlock.split(";");
             for (String line : lines) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
-                
+
                 // Check if it's a function pointer: type (*name)(params)
                 if (line.contains("(*") && line.contains(")(")) {
                     // Function pointer field - extract the name
@@ -273,15 +397,67 @@ public class CustomLibraryResolver {
                     }
                     continue;
                 }
-                
+
                 // Regular field: type name or type *name or struct type *name
                 // Remove array brackets if present
-                line = line.replaceAll("\\[\\d*\\]", "");
-                
+                line = line.replaceAll("\\[[^\\]]*\\]", "");
+
+                // Check for multi-variable declaration: robj *a, *b, *c (common in C structs)
+                if (line.contains(",")) {
+                    String[] parts = line.split(",");
+                    String firstPart = parts[0].trim();
+                    String[] firstTokens = firstPart.split("\\s+");
+                    if (firstTokens.length >= 2) {
+                        // Find the name in the first part (last valid identifier)
+                        String firstName = null;
+                        int firstNameIdx = -1;
+                        for (int i = firstTokens.length - 1; i >= 0; i--) {
+                            String tok = firstTokens[i].replaceAll("[^a-zA-Z0-9_]", "");
+                            if (!tok.isEmpty() && tok.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+                                firstName = tok;
+                                firstNameIdx = i;
+                                break;
+                            }
+                        }
+                        if (firstName != null && firstNameIdx > 0) {
+                            // Base type = tokens before name, stars stripped
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 0; i < firstNameIdx; i++) {
+                                String tok = firstTokens[i].replaceAll("\\*", "").trim();
+                                if (!tok.isEmpty()) {
+                                    if (sb.length() > 0) sb.append(" ");
+                                    sb.append(tok);
+                                }
+                            }
+                            String baseType = sb.toString().trim();
+                            // Count stars for first element (from all tokens)
+                            int firstStars = 0;
+                            for (String t : firstTokens) for (char c : t.toCharArray()) if (c == '*') firstStars++;
+                            String firstFieldType = baseType;
+                            for (int i = 0; i < firstStars; i++) firstFieldType += "*";
+                            struct.addField(firstName, firstFieldType);
+                            // Remaining comma-separated items: "*name" or "name"
+                            for (int pi = 1; pi < parts.length; pi++) {
+                                String part = parts[pi].trim();
+                                if (part.isEmpty()) continue;
+                                int stars = 0;
+                                for (char c : part.toCharArray()) if (c == '*') stars++;
+                                String name = part.replaceAll("[^a-zA-Z0-9_]", "").trim();
+                                if (!name.isEmpty() && name.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+                                    String fieldType = baseType;
+                                    for (int i = 0; i < stars; i++) fieldType += "*";
+                                    struct.addField(name, fieldType);
+                                }
+                            }
+                        }
+                    }
+                    continue; // skip single-var parsing below
+                }
+
                 // Split into tokens
                 String[] tokens = line.trim().split("\\s+");
                 if (tokens.length < 2) continue;
-                
+
                 // Find where the field name is (last token that's a valid identifier)
                 String fieldName = null;
                 int nameIndex = -1;
@@ -293,35 +469,58 @@ public class CustomLibraryResolver {
                         break;
                     }
                 }
-                
+
                 if (fieldName == null || nameIndex == 0) continue;
-                
+
                 // Build the type from all tokens before the name
                 StringBuilder typeBuilder = new StringBuilder();
                 for (int i = 0; i < nameIndex; i++) {
                     if (i > 0) typeBuilder.append(" ");
                     typeBuilder.append(tokens[i]);
                 }
-                
+
                 String fieldType = typeBuilder.toString();
-                
+
                 // Count pointers in the last token (might be attached to name like *name)
                 String lastToken = tokens[nameIndex];
                 int ptrCount = 0;
                 for (char c : lastToken.toCharArray()) {
                     if (c == '*') ptrCount++;
                 }
-                
+
                 // Add pointers to type
                 for (int i = 0; i < ptrCount; i++) {
                     fieldType += "*";
                 }
-                
+
                 struct.addField(fieldName, fieldType);
             }
-            
+
             structs.put(structName, struct);
         }
+    }
+
+    /**
+     * Remove all content inside nested brace blocks, keeping only the
+     * outermost level text.  This lets field parsing via ';' splitting
+     * work correctly even when a struct contains anonymous struct/union
+     * members (e.g. "struct { int a; } x;").  The declaration after the
+     * nested '}' (the field name, e.g. "x") is preserved.
+     */
+    private String stripNestedBraces(String content) {
+        StringBuilder sb = new StringBuilder();
+        int depth = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+            } else if (depth == 0) {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
     
     /**
@@ -329,43 +528,55 @@ public class CustomLibraryResolver {
      * Pattern: <return_type> <function_name>(<parameters>);
      */
     private void extractFunctionDeclarations(String content) {
-        // Pattern for function declarations
-        // Handles: return_type function_name(param_type param_name, ...);
-        // Updated to better handle pointer return types like "list *funcname(...)"
+        // Pattern for function declarations.
+        //  Group 1: return type base  – one or more identifier tokens separated by single spaces
+        //           e.g. "void", "unsigned long", "const char"
+        //  Group 2: pointer stars     – zero or more '*' between the return type and the name
+        //  Group 3: function name
+        //  Group 4: parameter string
+        //
+        // This three-part split avoids the previous bug where [a-zA-Z0-9_\s]* in group 1
+        // greedily consumed trailing whitespace and failed to match "void *funcname(...)".
+        // Use atomic groups (?>...) for each word token so the engine can only give back
+        // whole words during backtracking, not split e.g. "zfree" into "zfre" + "e".
         Pattern funcPattern = Pattern.compile(
-            "([a-zA-Z_][a-zA-Z0-9_\\s]*\\s*\\**?)\\s+\\*?\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(([^)]*)\\)\\s*;",
+            "((?>[a-zA-Z_][a-zA-Z0-9_]*)(?:\\s+(?>[a-zA-Z_][a-zA-Z0-9_]*))*)" +  // group 1: return base type
+            "\\s*(\\*+)?\\s*" +                                                     // group 2: optional pointer stars
+            "([a-zA-Z_][a-zA-Z0-9_]*)\\s*" +                                       // group 3: function name
+            "\\(([^()]*)\\)\\s*;",                                                  // group 4: params (no nested parens)
             Pattern.MULTILINE
         );
-        
+
         Matcher matcher = funcPattern.matcher(content);
         while (matcher.find()) {
-            String returnTypePart = matcher.group(1).trim();
-            String funcName = matcher.group(2).trim();
-            String paramsStr = matcher.group(3).trim();
-            
-            // Check if there's a * before function name (pointer return type)
-            String fullMatch = matcher.group(0);
-            String beforeFuncName = fullMatch.substring(0, fullMatch.indexOf(funcName)).trim();
-            String returnType = returnTypePart;
-            
-            // Count asterisks in the return type section
-            int pointerCount = 0;
-            for (char c : beforeFuncName.toCharArray()) {
-                if (c == '*') pointerCount++;
-            }
-            if (pointerCount > 0) {
-                returnType = returnTypePart + "*".repeat(pointerCount);
-            }
-            
-            // Skip if this looks like a macro or declaration we should ignore
-            if (returnType.isEmpty() || funcName.isEmpty()) {
-                continue;
-            }
-            
-            // Skip if it contains certain keywords that indicate it's not a simple function
-            if (returnType.contains("(") || funcName.contains("(")) {
-                continue;
-            }
+            String returnBase = matcher.group(1).trim();
+            String ptrStars    = matcher.group(2) != null ? matcher.group(2).trim() : "";
+            String funcName    = matcher.group(3).trim();
+            String paramsStr   = matcher.group(4).trim();
+
+            // Build full return type
+            String returnType = ptrStars.isEmpty() ? returnBase : returnBase + ptrStars;
+
+            // Skip obvious non-function matches (typedefs, macros, etc.)
+            if (returnType.isEmpty() || funcName.isEmpty()) continue;
+            if (returnType.contains("(") || funcName.contains("(")) continue;
+            // Skip typedef function-type declarations (e.g. typedef void proc(params);)
+            if (returnBase.startsWith("typedef")) continue;
+
+            // Skip C keywords mistakenly captured as function names
+            if (funcName.equals("if") || funcName.equals("while") || funcName.equals("for")
+                    || funcName.equals("return") || funcName.equals("switch")
+                    || funcName.equals("else") || funcName.equals("do")) continue;
+
+            // Skip matches where the "return type" is actually a C statement keyword.
+            // This happens when a return/if/while/for statement slips through and the
+            // regex matches: e.g. "return sizeof(username);" → returnBase="return", funcName="sizeof"
+            // overwriting the StandardLibrary's correct "sizeof" → "size_t" entry.
+            String firstWord = returnBase.split("\\s+")[0];
+            if (firstWord.equals("return") || firstWord.equals("if") || firstWord.equals("while")
+                    || firstWord.equals("for") || firstWord.equals("switch") || firstWord.equals("else")
+                    || firstWord.equals("do") || firstWord.equals("case") || firstWord.equals("break")
+                    || firstWord.equals("continue") || firstWord.equals("goto")) continue;
             
             // Parse parameters
             List<String> paramTypes = new ArrayList<>();

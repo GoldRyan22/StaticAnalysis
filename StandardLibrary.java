@@ -6,14 +6,18 @@ import java.nio.file.*;
 public class StandardLibrary {
     private Map<String, LibraryFunction> functions;
     private Map<String, String> typedefs;
+    private Map<String, String> variables;  // global variables / macro constants
     private Set<String> usedFunctions;
     private Set<String> usedTypes;
+    private Set<String> usedVariables;
     
     public StandardLibrary() {
         this.functions = new HashMap<>();
         this.typedefs = new HashMap<>();
+        this.variables = new HashMap<>();
         this.usedFunctions = new HashSet<>();
         this.usedTypes = new HashSet<>();
+        this.usedVariables = new HashSet<>();
         initializeStandardLibrary();
     }
     
@@ -92,10 +96,99 @@ public class StandardLibrary {
         addTypedef("va_list", "char*");
         addTypedef("errno_t", "int");
         addTypedef("rsize_t", "unsigned long");
+        addTypedef("socklen_t", "unsigned int");  // sys/socket.h
+        addTypedef("sa_family_t", "unsigned short"); // sys/socket.h
+        addTypedef("in_port_t", "unsigned short");   // netinet/in.h
+        addTypedef("in_addr_t", "unsigned int");      // netinet/in.h
+        addTypedef("mode_t", "unsigned int");         // sys/types.h
+        addTypedef("uint32_t", "unsigned int");       // stdint.h
         
         // Built-in C operators registered as functions for semantic analysis
         // sizeof(expr) and sizeof(type) both return size_t
         addFunction("sizeof", "size_t", "...");
+        
+        // errno.h — errno variable and standard error constants
+        addVariable("errno", "int");       // thread-local error number
+        addVariable("EPERM",   "int");     // Operation not permitted
+        addVariable("ENOENT",  "int");     // No such file or directory
+        addVariable("ESRCH",   "int");     // No such process
+        addVariable("EINTR",   "int");     // Interrupted system call
+        addVariable("EIO",     "int");     // I/O error
+        addVariable("ENXIO",   "int");     // No such device or address
+        addVariable("E2BIG",   "int");     // Argument list too long
+        addVariable("ENOEXEC", "int");     // Exec format error
+        addVariable("EBADF",   "int");     // Bad file number
+        addVariable("ECHILD",  "int");     // No child processes
+        addVariable("EAGAIN",  "int");     // Try again / EWOULDBLOCK
+        addVariable("ENOMEM",  "int");     // Out of memory
+        addVariable("EACCES",  "int");     // Permission denied
+        addVariable("EFAULT",  "int");     // Bad address
+        addVariable("EBUSY",   "int");     // Device or resource busy
+        addVariable("EEXIST",  "int");     // File exists
+        addVariable("EXDEV",   "int");     // Cross-device link
+        addVariable("ENODEV",  "int");     // No such device
+        addVariable("ENOTDIR", "int");     // Not a directory
+        addVariable("EISDIR",  "int");     // Is a directory
+        addVariable("EINVAL",  "int");     // Invalid argument
+        addVariable("ENFILE",  "int");     // File table overflow
+        addVariable("EMFILE",  "int");     // Too many open files
+        addVariable("ENOTTY",  "int");     // Not a typewriter
+        addVariable("EFBIG",   "int");     // File too large
+        addVariable("ENOSPC",  "int");     // No space left on device
+        addVariable("ESPIPE",  "int");     // Illegal seek
+        addVariable("EROFS",   "int");     // Read-only file system
+        addVariable("EMLINK",  "int");     // Too many links
+        addVariable("EPIPE",   "int");     // Broken pipe
+        addVariable("EDOM",    "int");     // Math argument out of domain
+        addVariable("ERANGE",  "int");     // Math result not representable
+        addVariable("EDEADLK", "int");     // Resource deadlock would occur
+        addVariable("ENAMETOOLONG", "int"); // File name too long
+        addVariable("ENOLCK",  "int");     // No record locks available
+        addVariable("ENOSYS",  "int");     // Invalid system call number
+        addVariable("ENOTEMPTY", "int");   // Directory not empty
+        addVariable("ELOOP",   "int");     // Too many symbolic links
+        addVariable("EWOULDBLOCK", "int"); // Operation would block (= EAGAIN)
+        addVariable("ENOMSG",  "int");     // No message of desired type
+        addVariable("EIDRM",   "int");     // Identifier removed
+        addVariable("ENOSTR",  "int");     // Device not a stream
+        addVariable("ENODATA", "int");     // No data available
+        addVariable("ETIME",   "int");     // Timer expired
+        addVariable("ENOSR",   "int");     // Out of streams resources
+        addVariable("EREMOTE", "int");     // Object is remote
+        addVariable("ENOLINK", "int");     // Link has been severed
+        addVariable("EPROTO",  "int");     // Protocol error
+        addVariable("EMULTIHOP", "int");   // Multihop attempted
+        addVariable("EBADMSG", "int");     // Not a data message
+        addVariable("EOVERFLOW", "int");   // Value too large for defined data type
+        addVariable("EILSEQ",  "int");     // Illegal byte sequence
+        addVariable("EUSERS",  "int");     // Too many users
+        addVariable("ENOTSOCK", "int");    // Socket operation on non-socket
+        addVariable("EDESTADDRREQ", "int"); // Destination address required
+        addVariable("EMSGSIZE", "int");    // Message too long
+        addVariable("EPROTOTYPE", "int"); // Protocol wrong type for socket
+        addVariable("ENOPROTOOPT", "int"); // Protocol not available
+        addVariable("EPROTONOSUPPORT", "int"); // Protocol not supported
+        addVariable("EOPNOTSUPP", "int");  // Operation not supported on transport endpoint
+        addVariable("EAFNOSUPPORT", "int"); // Address family not supported by protocol
+        addVariable("EADDRINUSE", "int");  // Address already in use
+        addVariable("EADDRNOTAVAIL", "int"); // Cannot assign requested address
+        addVariable("ENETDOWN", "int");    // Network is down
+        addVariable("ENETUNREACH", "int"); // Network is unreachable
+        addVariable("ENETRESET", "int");   // Network dropped connection because of reset
+        addVariable("ECONNABORTED", "int"); // Software caused connection abort
+        addVariable("ECONNRESET", "int");  // Connection reset by peer
+        addVariable("ENOBUFS",  "int");    // No buffer space available
+        addVariable("EISCONN",  "int");    // Transport endpoint is already connected
+        addVariable("ENOTCONN", "int");    // Transport endpoint is not connected
+        addVariable("ETIMEDOUT", "int");   // Connection timed out
+        addVariable("ECONNREFUSED", "int"); // Connection refused
+        addVariable("EHOSTUNREACH", "int"); // No route to host
+        addVariable("EALREADY", "int");    // Operation already in progress
+        addVariable("EINPROGRESS", "int"); // Operation now in progress
+        addVariable("ESTALE",  "int");     // Stale file handle
+        addVariable("ECANCELED", "int");   // Operation canceled
+        addVariable("EOWNERDEAD", "int");  // Owner died
+        addVariable("ENOTRECOVERABLE", "int"); // State not recoverable
         
         // stdlib.h
         addFunction("malloc", "void*", "size_t");
@@ -906,6 +999,10 @@ public class StandardLibrary {
         typedefs.put(name, baseType);
     }
     
+    private void addVariable(String name, String type) {
+        variables.put(name, type);
+    }
+    
     public void scanForUsedSymbols(ProgramNode program) {
         usedFunctions.clear();
         usedTypes.clear();
@@ -1020,6 +1117,11 @@ public class StandardLibrary {
                 symbolTable.addSymbol(symbol);
             }
         }
+        
+        // Register all standard variables / errno constants unconditionally
+        for (Map.Entry<String, String> entry : variables.entrySet()) {
+            symbolTable.addSymbol(entry.getKey(), entry.getValue(), "variable");
+        }
     }
     
     public boolean isStandardFunction(String name) {
@@ -1028,6 +1130,10 @@ public class StandardLibrary {
     
     public boolean isStandardType(String name) {
         return typedefs.containsKey(name);
+    }
+    
+    public boolean isStandardVariable(String name) {
+        return variables.containsKey(name);
     }
 
     public Set<String> getTypedefNames() {

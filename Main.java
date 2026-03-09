@@ -34,6 +34,21 @@ public class Main
             String sourceDir = new java.io.File(filename).getParent();
             if (sourceDir == null) sourceDir = ".";
             CustomLibraryResolver customResolver = new CustomLibraryResolver(sourceDir);
+
+            // Add -I<dir> include paths and parent dirs of any explicit header args
+            for (int i = 1; i < args.length; i++) {
+                String arg = args[i];
+                if (arg.startsWith("-I")) {
+                    // -I<dir> or -I <dir>
+                    String iDir = arg.length() > 2 ? arg.substring(2) : (i + 1 < args.length ? args[++i] : null);
+                    if (iDir != null) customResolver.addSearchDirectory(iDir);
+                } else if (!arg.startsWith("--")) {
+                    // An explicit header/source file: add its parent directory
+                    String parentDir = new java.io.File(arg).getAbsoluteFile().getParent();
+                    if (parentDir != null) customResolver.addSearchDirectory(parentDir);
+                }
+            }
+
             List<String> customIncludes = customResolver.extractCustomIncludes(filename);
             for (String header : customIncludes) {
                 customResolver.parseHeaderFile(header);

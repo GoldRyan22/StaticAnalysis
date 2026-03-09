@@ -28,6 +28,27 @@ public class SemanticAnalyzer {
     private Map<String, StructDeclNode> structDefinitions;
     private StandardLibrary standardLibrary;
     private CustomLibraryResolver customResolver;
+    // Heap-allocated pointers in the current function scope (for leak detection)
+    private Set<String> functionLocalHeap = new HashSet<>();
+    // Depth of conditional/loop nesting — free() inside a branch must not mark
+    // a pointer as unconditionally freed (avoids false double-free reports).
+    private int conditionalDepth = 0;
+
+    private static final Set<String> ALLOC_FUNCTIONS = new HashSet<>(Arrays.asList(
+        "malloc", "calloc", "realloc",
+        "zmalloc", "zcalloc", "zrealloc", "zmalloc_no_tcache", "ztry_malloc",
+        "zstrdup", "zstrndup",
+        "sdsnew", "sdsnewlen", "sdsempty", "sdsdup", "sdsMakeRoomFor", "sdsRemoveFreeSpace",
+        "listCreate", "dictCreate", "raxNew", "ziplistNew", "listpackNew"
+    ));
+    private static final Set<String> FREE_FUNCTIONS = new HashSet<>(Arrays.asList(
+        "free", "zfree", "zfree_no_tcache",
+        "sdsfree", "sdsfreegeneric",
+        "listRelease", "dictRelease", "raxFree"
+    ));
+
+    private boolean isAllocFunction(String name) { return ALLOC_FUNCTIONS.contains(name); }
+    private boolean isFreeFunction(String name)  { return FREE_FUNCTIONS.contains(name); }
     
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
@@ -54,6 +75,7 @@ public class SemanticAnalyzer {
             customResolver.scanForUsedSymbols(program);
             customResolver.registerUsedSymbols(symbolTable);
             customResolver.registerConstants(symbolTable);
+            customResolver.registerExternVariables(symbolTable);
         }
         
         // First pass: collect all declarations (functions, typedefs, global vars, structs)
@@ -106,7 +128,9 @@ public class SemanticAnalyzer {
     
     private void analyzeGlobalVariable(VarDeclNode node) {
         if (symbolTable.lookupInCurrentScope(node.name) != null) {
-            addError("Variable '" + node.name + "' already declared in global scope");
+            // In C, an extern declaration in a header followed by a definition in the
+            // source file is perfectly valid. Silently skip re-declaration instead of
+            // reporting a false positive.
             return;
         }
         
@@ -133,31 +157,42 @@ public class SemanticAnalyzer {
     private void analyzeFunctionBody(FuncDeclNode node) {
         currentFunction = node.name;
         symbolTable.enterScope();
-        
-        // Add parameters to scope
-        for (VarDeclNode param : node.args) {
-            if (symbolTable.lookupInCurrentScope(param.name) != null) {
-                addError("Parameter '" + param.name + "' already declared");
-            } else {
-                symbolTable.addSymbol(param.name, param.type, "parameter");
-                
-                // Track pointer parameters
-                if (param.type.contains("*")) {
-                    aliasTable.addPointer(param.name, symbolTable.getCurrentLevel());
-                    if (param.type.startsWith("void")) {
-                        aliasTable.markVoidPointer(param.name);
+        try {
+            // Add parameters to scope
+            for (VarDeclNode param : node.args) {
+                if (param.name.equals("...")) continue; // skip variadic sentinel
+                if (symbolTable.lookupInCurrentScope(param.name) != null) {
+                    addError("Parameter '" + param.name + "' already declared");
+                } else {
+                    symbolTable.addSymbol(param.name, param.type, "parameter");
+
+                    // Track pointer parameters
+                    if (param.type.contains("*")) {
+                        aliasTable.addPointer(param.name, symbolTable.getCurrentLevel());
+                        if (param.type.startsWith("void")) {
+                            aliasTable.markVoidPointer(param.name);
+                        }
                     }
                 }
             }
+
+            // Analyze function body
+            if (node.body != null) {
+                analyzeStatement(node.body, node.retType);
+            }
+        } finally {
+            // Memory leak check: any heap-allocated pointers not freed before function exit
+            for (String ptr : functionLocalHeap) {
+                addWarning("Memory leak: '" + ptr + "' allocated but never freed in '" + currentFunction + "'");
+                aliasTable.recordLeak(ptr + " in " + currentFunction);
+            }
+            functionLocalHeap.clear();
+            conditionalDepth = 0; // safety reset between functions
+            // Always exit scope, even if analysis throws — prevents scope level leak
+            // that would cause parameter names to persist into the next function's scope.
+            symbolTable.exitScope();
+            currentFunction = null;
         }
-        
-        // Analyze function body
-        if (node.body != null) {
-            analyzeStatement(node.body, node.retType);
-        }
-        
-        symbolTable.exitScope();
-        currentFunction = null;
     }
     
     private void analyzeStatement(ASTNode node, String expectedReturnType) {
@@ -172,8 +207,16 @@ public class SemanticAnalyzer {
         else if (node instanceof VarDeclNode) {
             VarDeclNode varDecl = (VarDeclNode) node;
             
-            if (symbolTable.lookupInCurrentScope(varDecl.name) != null) {
-                addError("Variable '" + varDecl.name + "' already declared in this scope");
+            Symbol existingSymbol = symbolTable.lookupInCurrentScope(varDecl.name);
+            if (existingSymbol != null) {
+                // Same-type re-declaration is common in #if/#else preprocessor blocks.
+                // Preprocessor directives are stripped from the token stream, so both
+                // branches of an #ifdef appear in the same scope. Only report an error
+                // if the type actually differs (a genuine re-declaration conflict).
+                if (!existingSymbol.type.equals(varDecl.type)) {
+                    addError("Variable '" + varDecl.name + "' already declared in this scope");
+                }
+                // else: silently skip same-type re-declaration (likely from #if/#else)
             } else {
                 symbolTable.addSymbol(varDecl.name, varDecl.type, "variable");
                 
@@ -187,6 +230,23 @@ public class SemanticAnalyzer {
                 
                 // Check initialization
                 if (varDecl.initExpr != null) {
+                    // int *p = malloc(...) — mark as heap-allocated
+                    if (varDecl.initExpr instanceof FuncCallNode) {
+                        String callee = ((FuncCallNode) varDecl.initExpr).name;
+                        if (isAllocFunction(callee) && varDecl.type.contains("*")) {
+                            aliasTable.markHeapAllocated(varDecl.name, symbolTable.getCurrentLevel());
+                            functionLocalHeap.add(varDecl.name);
+                        }
+                    }
+                    // int *q = p — ownership transfer if p was heap-allocated
+                    if (varDecl.initExpr instanceof IdNode && varDecl.type.contains("*")) {
+                        String sourcePtr = ((IdNode) varDecl.initExpr).name;
+                        if (functionLocalHeap.contains(sourcePtr)) {
+                            functionLocalHeap.remove(sourcePtr);
+                            functionLocalHeap.add(varDecl.name);
+                            aliasTable.markHeapAllocated(varDecl.name, symbolTable.getCurrentLevel());
+                        }
+                    }
                     String exprType = inferType(varDecl.initExpr);
                     if (!isTypeCompatible(varDecl.type, exprType)) {
                         addError("Type mismatch in initialization of '" + varDecl.name + 
@@ -206,13 +266,15 @@ public class SemanticAnalyzer {
             }
             
             symbolTable.enterScope();
-            analyzeStatement(ifStmt.thenBranch, expectedReturnType);
-            symbolTable.exitScope();
-            
+            conditionalDepth++;
+            try { analyzeStatement(ifStmt.thenBranch, expectedReturnType); }
+            finally { conditionalDepth--; symbolTable.exitScope(); }
+
             if (ifStmt.elseBranch != null) {
                 symbolTable.enterScope();
-                analyzeStatement(ifStmt.elseBranch, expectedReturnType);
-                symbolTable.exitScope();
+                conditionalDepth++;
+                try { analyzeStatement(ifStmt.elseBranch, expectedReturnType); }
+                finally { conditionalDepth--; symbolTable.exitScope(); }
             }
         }
         else if (node instanceof WhileStmtNode) {
@@ -225,13 +287,18 @@ public class SemanticAnalyzer {
             }
             
             symbolTable.enterScope();
-            analyzeStatement(whileStmt.body, expectedReturnType);
-            symbolTable.exitScope();
+            conditionalDepth++;
+            try { analyzeStatement(whileStmt.body, expectedReturnType); }
+            finally { conditionalDepth--; symbolTable.exitScope(); }
         }
         else if (node instanceof ReturnStmtNode) {
             ReturnStmtNode retStmt = (ReturnStmtNode) node;
             
             if (retStmt.expr != null) {
+                // Returning a heap pointer transfers ownership to the caller — not a leak
+                if (retStmt.expr instanceof IdNode) {
+                    functionLocalHeap.remove(((IdNode) retStmt.expr).name);
+                }
                 String returnType = inferType(retStmt.expr);
                 if (!isTypeCompatible(expectedReturnType, returnType)) {
                     addError("Return type mismatch in function '" + currentFunction + 
@@ -267,11 +334,31 @@ public class SemanticAnalyzer {
         
         // Assignment operator - check for pointer aliasing
         if (node.operator.equals("=")) {
+            // struct->field = ptr  or  struct.field = ptr
+            // — pointer is being stored into a data structure; ownership transfers out.
+            if ((node.left instanceof BinaryExprNode) && node.right instanceof IdNode) {
+                BinaryExprNode lhs = (BinaryExprNode) node.left;
+                if (lhs.operator.equals("->") || lhs.operator.equals(".")) {
+                    functionLocalHeap.remove(((IdNode) node.right).name);
+                }
+            }
             if (node.left instanceof IdNode) {
                 String varName = ((IdNode) node.left).name;
                 Symbol symbol = symbolTable.lookup(varName);
                 
                 if (symbol != null && symbol.isPointer) {
+                    // p = malloc(...) — heap allocation
+                    if (node.right instanceof FuncCallNode) {
+                        String callee = ((FuncCallNode) node.right).name;
+                        if (isAllocFunction(callee)) {
+                            // Only track locals; globals are intentionally long-lived
+                            Symbol sym = symbolTable.lookup(varName);
+                            if (sym != null && sym.scopeLevel > 0) {
+                                aliasTable.markHeapAllocated(varName, symbolTable.getCurrentLevel());
+                                functionLocalHeap.add(varName);
+                            }
+                        }
+                    }
                     // Track pointer assignment
                     if (node.right instanceof UnaryExprNode) {
                         UnaryExprNode unary = (UnaryExprNode) node.right;
@@ -281,6 +368,12 @@ public class SemanticAnalyzer {
                         }
                     } else if (node.right instanceof IdNode) {
                         String sourcePtr = ((IdNode) node.right).name;
+                        // Ownership transfer: if sourcePtr was heap-allocated, dst inherits it
+                        if (functionLocalHeap.contains(sourcePtr)) {
+                            functionLocalHeap.remove(sourcePtr);
+                            functionLocalHeap.add(varName);
+                            aliasTable.markHeapAllocated(varName, symbolTable.getCurrentLevel());
+                        }
                         // Copy aliases
                         Set<String> aliases = aliasTable.getPointsToSet(sourcePtr);
                         for (String alias : aliases) {
@@ -319,7 +412,12 @@ public class SemanticAnalyzer {
                 addError("Cannot dereference non-pointer type: " + exprType);
             } else if (node.expr instanceof IdNode) {
                 String ptrName = ((IdNode) node.expr).name;
-                aliasTable.checkDereference(ptrName, 0);
+                if (aliasTable.isFreed(ptrName)) {
+                    addError("Use after free: pointer '" + ptrName + "' was freed");
+                    aliasTable.recordUseAfterFree("'" + ptrName + "' (" + currentFunction + ")");
+                } else {
+                    aliasTable.checkDereference(ptrName, 0);
+                }
             }
         }
         
@@ -340,7 +438,35 @@ public class SemanticAnalyzer {
             }
             return;
         }
-        
+
+        // free() / zfree() — mark pointer as freed, detect double-free
+        if (isFreeFunction(node.name) && !node.args.isEmpty()) {
+            ASTNode firstArg = node.args.get(0);
+            if (firstArg instanceof IdNode) {
+                String ptrName = ((IdNode) firstArg).name;
+                if (conditionalDepth == 0) {
+                    // Top-level free: safe to mark as freed and detect double-free
+                    boolean ok = aliasTable.markFreed(ptrName);
+                    if (!ok) {
+                        addError("Double free of pointer '" + ptrName + "'");
+                    }
+                }
+                // Always remove from leak tracker (pointer is freed on at least one path)
+                functionLocalHeap.remove(ptrName);
+            }
+        }
+
+        // Any heap pointer passed as an argument to a non-free function is assumed
+        // to have its ownership transferred (e.g. listAddNodeHead, raxInsert, dictAdd).
+        // This avoids false leak warnings for the ubiquitous "store into data structure" pattern.
+        if (!isFreeFunction(node.name)) {
+            for (ASTNode arg : node.args) {
+                if (arg instanceof IdNode) {
+                    functionLocalHeap.remove(((IdNode) arg).name);
+                }
+            }
+        }
+
         Symbol funcSymbol = symbolTable.lookup(node.name);
         
         if (funcSymbol == null) {
@@ -434,9 +560,14 @@ public class SemanticAnalyzer {
             if (leftType.equals("unknown") || rightType.equals("unknown")) return "unknown";
 
             // Array subscript a[i]: deref one pointer level — T**[i] -> T*, T*[i] -> T
+            // Also handle array-declared types: T[][i] -> T, T[N][i] -> T
             if (binExpr.operator.equals("[")) {
                 if (leftType.contains("*")) {
                     return leftType.replaceFirst("\\s*\\*", "").trim();
+                }
+                // Strip trailing [] or [N] — array element type
+                if (leftType.contains("[")) {
+                    return leftType.replaceAll("\\s*\\[.*?\\]\\s*$", "").trim();
                 }
                 return leftType;
             }
@@ -464,7 +595,16 @@ public class SemanticAnalyzer {
             String exprType = inferType(unaryExpr.expr);
             
             if (unaryExpr.operator.equals("*")) {
-                // Dereference: remove one level of pointer
+                // Dereference: check for use-after-free, then strip one pointer level
+                if (unaryExpr.expr instanceof IdNode) {
+                    String ptrName = ((IdNode) unaryExpr.expr).name;
+                    if (aliasTable.isFreed(ptrName)) {
+                        addError("Use after free: pointer '" + ptrName + "' was freed");
+                        aliasTable.recordUseAfterFree("'" + ptrName + "' (" + currentFunction + ")");
+                    } else {
+                        aliasTable.checkDereference(ptrName, 0);
+                    }
+                }
                 if (exprType.contains("*")) {
                     return exprType.replaceFirst("\\*", "");
                 }
@@ -610,6 +750,25 @@ public class SemanticAnalyzer {
 
         if (resolvedExpected.equals("int") && resolvedActual.equals("char")) return true;
         if (resolvedExpected.equals("unsigned") && resolvedActual.equals("int")) return true;
+        // "unsigned int" is the same type as "unsigned" in C; both are compatible with int
+        if (resolvedExpected.equals("unsigned int") && (resolvedActual.equals("int") || resolvedActual.equals("unsigned"))) return true;
+        if (resolvedActual.equals("unsigned int") && (resolvedExpected.equals("int") || resolvedExpected.equals("unsigned"))) return true;
+        if (resolvedExpected.equals("unsigned int") && resolvedActual.equals("unsigned int")) return true;
+        // unsigned int is also compatible with unsigned long / long (integer widening)
+        if (resolvedExpected.equals("unsigned long") && resolvedActual.equals("unsigned int")) return true;
+        if (resolvedActual.equals("unsigned long") && resolvedExpected.equals("unsigned int")) return true;
+
+        // char / unsigned char / signed char are all assignment-compatible in C
+        if (resolvedExpected.equals("char") && (resolvedActual.equals("unsigned char") || resolvedActual.equals("signed char") || resolvedActual.equals("unsigned"))) return true;
+        if (resolvedActual.equals("char") && (resolvedExpected.equals("unsigned char") || resolvedExpected.equals("signed char") || resolvedExpected.equals("unsigned"))) return true;
+        if (resolvedExpected.equals("unsigned char") && resolvedActual.equals("unsigned")) return true;
+        if (resolvedActual.equals("unsigned char") && resolvedExpected.equals("unsigned")) return true;
+        // int literals are implicitly convertible to char types in C (e.g. unsigned char x = 0;)
+        if ((resolvedExpected.equals("unsigned char") || resolvedExpected.equals("signed char"))
+                && (resolvedActual.equals("int") || resolvedActual.equals("long") || resolvedActual.equals("short")
+                    || resolvedActual.equals("unsigned int") || resolvedActual.equals("unsigned long"))) return true;
+        if (resolvedActual.equals("unsigned char") && (resolvedExpected.equals("int") || resolvedExpected.equals("long")
+                || resolvedExpected.equals("short") || resolvedExpected.equals("unsigned int"))) return true;
 
         // Numeric widening: long/unsigned long are compatible with int
         if (resolvedExpected.equals("long") && resolvedActual.equals("int")) return true;
@@ -624,20 +783,53 @@ public class SemanticAnalyzer {
         if (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("int")) return true;
         if (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("unsigned")) return true;
         if (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("unsigned long")) return true;
-        
-        
-        
+
+        // size_t (unsigned long) is compatible with all integer types — C does implicit integer conversion.
+        // This prevents false positives for sizeof()/strlen() results passed to functions expecting size_t,
+        // and for int literals passed where size_t is the declared parameter type.
+        if (resolvedExpected.equals("size_t") || resolvedExpected.equals("unsigned long")) {
+            if (resolvedActual.equals("int") || resolvedActual.equals("long") || resolvedActual.equals("long long")
+                    || resolvedActual.equals("unsigned") || resolvedActual.equals("unsigned int")
+                    || resolvedActual.equals("unsigned long") || resolvedActual.equals("unsigned long long")
+                    || resolvedActual.equals("size_t") || resolvedActual.equals("short")
+                    || resolvedActual.equals("ssize_t") || resolvedActual.equals("socklen_t")) return true;
+        }
+        if (resolvedActual.equals("size_t") || resolvedActual.equals("unsigned long")) {
+            if (resolvedExpected.equals("int") || resolvedExpected.equals("long") || resolvedExpected.equals("long long")
+                    || resolvedExpected.equals("unsigned") || resolvedExpected.equals("unsigned int")
+                    || resolvedExpected.equals("unsigned long") || resolvedExpected.equals("unsigned long long")
+                    || resolvedExpected.equals("size_t") || resolvedExpected.equals("short")
+                    || resolvedExpected.equals("ssize_t") || resolvedExpected.equals("socklen_t")) return true;
+        }
+        // socklen_t (unsigned int) is compatible with size_t and int-family types
+        if (resolvedExpected.equals("socklen_t")) {
+            if (resolvedActual.equals("int") || resolvedActual.equals("unsigned") || resolvedActual.equals("unsigned int")
+                    || resolvedActual.equals("size_t") || resolvedActual.equals("unsigned long")) return true;
+        }
+        if (resolvedActual.equals("socklen_t")) {
+            if (resolvedExpected.equals("int") || resolvedExpected.equals("unsigned") || resolvedExpected.equals("unsigned int")
+                    || resolvedExpected.equals("size_t") || resolvedExpected.equals("unsigned long")) return true;
+        }
+        // ssize_t is a signed pointer-sized integer; treat as compatible with int/long
+        if (resolvedExpected.equals("ssize_t") && (resolvedActual.equals("int") || resolvedActual.equals("long")
+                || resolvedActual.equals("long long") || resolvedActual.equals("unsigned") || resolvedActual.equals("unsigned long"))) return true;
+        if (resolvedActual.equals("ssize_t") && (resolvedExpected.equals("int") || resolvedExpected.equals("long")
+                || resolvedExpected.equals("long long") || resolvedExpected.equals("unsigned") || resolvedExpected.equals("unsigned long"))) return true;
+
         // const-qualification: const char* and char* are compatible
         String strippedExpected = resolvedExpected.replaceAll("\\bconst\\b\\s*", "").trim();
         String strippedActual   = resolvedActual  .replaceAll("\\bconst\\b\\s*", "").trim();
         if (strippedExpected.equals(strippedActual)) return true;
 
+        // void* (and const void*) is compatible with any pointer type, including unresolved
+        // pointer typedefs (e.g. sds which is typedef char*, but may not have been resolved yet).
+        // Use the const-stripped versions so "const void*" is also matched.
+        if (strippedExpected.startsWith("void*") || strippedActual.startsWith("void*")) {
+            return true;
+        }
+
         // Pointer compatibility
         if (resolvedExpected.contains("*") && resolvedActual.contains("*")) {
-            // void* is compatible with any pointer
-            if (resolvedExpected.startsWith("void*") || resolvedActual.startsWith("void*")) {
-                return true;
-            }
             // unknown* is compatible with any pointer (unresolved type from external symbol)
             if (resolvedExpected.startsWith("unknown") || resolvedActual.startsWith("unknown")) {
                 return true;

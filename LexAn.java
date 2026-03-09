@@ -142,7 +142,7 @@ class State0 extends States
         {
             newState = new StringBurner();
         }
-        else if(Character.isLetter(currentChar))
+        else if(Character.isLetter(currentChar) || currentChar == '_')
         {
             newState = new IDKEY_BurnState();
         }
@@ -666,6 +666,18 @@ class LESSState extends FinalState{}
 
 class LESSEQState extends FinalState{}
 
+class LSHIFTState extends FinalState{}
+
+class WillBeLSHIFT extends States
+{
+    @Override
+    States HandleState(char currentChar)
+    {
+        newState = new LSHIFTState();
+        return newState;
+    }
+}
+
 class LessEQgetEq extends States
 {
 
@@ -688,6 +700,11 @@ class LessORLessEqState extends States
             newState = new LessEQgetEq();
             return newState;
         }
+        else if(currentChar == '<')
+        {
+            newState = new WillBeLSHIFT();
+            return newState;
+        }
         else
         {
             newState = new LESSState();
@@ -700,6 +717,18 @@ class LessORLessEqState extends States
 class GREATERState extends FinalState{}
 
 class GREATEREQState extends FinalState{}
+
+class RSHIFTState extends FinalState{}
+
+class WillBeRSHIFT extends States
+{
+    @Override
+    States HandleState(char currentChar)
+    {
+        newState = new RSHIFTState();
+        return newState;
+    }
+}
 
 class GreaterEqgetEq extends States
 {
@@ -719,6 +748,11 @@ class GreaterORGreaterEqState extends States
         if(currentChar == '=')
         {
             newState = new GreaterEqgetEq();
+            return newState;
+        }
+        else if(currentChar == '>')
+        {
+            newState = new WillBeRSHIFT();
             return newState;
         }
         else

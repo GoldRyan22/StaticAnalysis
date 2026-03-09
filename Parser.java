@@ -358,6 +358,9 @@ public class Parser
                 // Handle variadic parameter: ...
                 if (check("DOT")) {
                     while (check("DOT")) advance(); // consume all three dots
+                    // Record the variadic marker so the symbol table sees this as variadic.
+                    // SemanticAnalyzer checks paramTypes.last().equals("...") to detect variadic.
+                    args.add(new VarDeclNode("...", "...", null));
                     break;
                 }
                 String argType = parseType();
@@ -735,8 +738,8 @@ public class Parser
         }
         // Handle compound assignments: +=, -=, *=, /=, &=, |=
         // The lexer produces two tokens (e.g. ADDFinal then ASSIGN), so peek ahead
-        String[] compoundOps = {"ADDFinal", "ADD", "SUBFinal", "SUB", "MUL", "DIV", "BITAND", "BITOR"};
-        String[] opSymbols   = {"+",        "+",   "-",        "-",   "*",   "/",   "&",      "|"};
+        String[] compoundOps = {"ADDFinal", "ADD", "SUBFinal", "SUB", "MUL", "DIV", "BITAND", "BITOR", "LSHIFT", "RSHIFT"};
+        String[] opSymbols   = {"+",        "+",   "-",        "-",   "*",   "/",   "&",      "|",     "<<",     ">>"    };
         for (int i = 0; i < compoundOps.length; i++) {
             if (check(compoundOps[i]) && current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN")) {
                 String op = opSymbols[i];
@@ -817,7 +820,7 @@ public class Parser
 
     private ASTNode parseRelational() 
     {
-        ASTNode expr = parseAddSub();
+        ASTNode expr = parseShift();
         while (check("LESS") || check("LESSEQ") || check("GREATER") || check("GREATEREQ")) 
         {
             Token opTk = advance();
@@ -826,6 +829,19 @@ public class Parser
             if(opTk.code.equals("LESSEQ")) op = "<=";
             if(opTk.code.equals("GREATER")) op = ">";
             if(opTk.code.equals("GREATEREQ")) op = ">=";
+            ASTNode right = parseShift();
+            expr = new BinaryExprNode(expr, op, right);
+        }
+        return expr;
+    }
+
+    private ASTNode parseShift()
+    {
+        ASTNode expr = parseAddSub();
+        while ((check("LSHIFT") || check("RSHIFT"))
+               && !(current + 1 < tokens.size() && tokens.get(current + 1).code.equals("ASSIGN")))
+        {
+            String op = advance().code.equals("LSHIFT") ? "<<" : ">>";
             ASTNode right = parseAddSub();
             expr = new BinaryExprNode(expr, op, right);
         }
