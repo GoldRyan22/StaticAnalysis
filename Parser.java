@@ -217,13 +217,73 @@ public class Parser
         List<VarDeclNode> fields = new ArrayList<>();
         while (!check("RACC") && !isAtEnd()) 
         {
+            // Skip nested struct/union anonymous members
+            if (check("STRUCT") || check("UNION")) {
+                advance();
+                if (check("LACC")) {
+                    advance(); int d = 1;
+                    while (!isAtEnd() && d > 0) {
+                        if (check("LACC")) { d++; advance(); }
+                        else if (check("RACC")) { d--; if (d > 0) advance(); else break; }
+                        else advance();
+                    }
+                    consume("RACC", "Expect } to close nested struct/union");
+                    if (check("ID")) consume("ID", ""); // optional member name
+                    if (check("SEMICOLON")) advance();
+                    continue;
+                } else {
+                    current--; // put STRUCT/UNION back and fall through
+                }
+            }
+            if (check("RACC")) break;
+            // Handle function pointer fields: type (*name)(params);
+            if (check("LPAR")) {
+                while (!check("SEMICOLON") && !check("RACC") && !isAtEnd()) advance();
+                if (check("SEMICOLON")) advance();
+                continue;
+            }
             String type = parseType();
+            if (check("RACC") || isAtEnd()) break;
+            if (check("LPAR")) {
+                // function pointer field
+                while (!check("SEMICOLON") && !check("RACC") && !isAtEnd()) advance();
+                if (check("SEMICOLON")) advance();
+                continue;
+            }
             String fieldName = consume("ID", "Expect field name").value.toString();
-            consume("SEMICOLON", "Expect ;");
+            // Skip optional array brackets (multi-dimensional)
+            while (check("LBRACKET")) {
+                while (!check("RBRACKET") && !isAtEnd()) advance();
+                advance(); // consume ]
+            }
+            if (check("SEMICOLON")) advance();
             fields.add(new VarDeclNode(type, fieldName, null));
         }
         consume("RACC", "Expect }");
-        consume("SEMICOLON", "Expect ;");
+
+        // After }, there may be a trailing variable: Name[] = { ... };  (e.g. struct Foo { } arr[] = {...};)
+        if (check("ID")) {
+            advance(); // consume trailing variable name
+        }
+        // Skip optional array brackets (multi-dimensional)
+        while (check("LBRACKET")) {
+            while (!check("RBRACKET") && !isAtEnd()) advance();
+            advance(); // consume ]
+        }
+        // Skip optional initializer: = { ... }
+        if (check("ASSIGN")) {
+            advance(); // consume =
+            if (check("LACC")) {
+                advance(); int d = 1;
+                while (!isAtEnd() && d > 0) {
+                    if (check("LACC")) { d++; advance(); }
+                    else if (check("RACC")) { d--; if (d > 0) advance(); else break; }
+                    else advance();
+                }
+                consume("RACC", "Expect } to close struct initializer");
+            }
+        }
+        consume("SEMICOLON", "Expect ; after struct declaration");
         return new StructDeclNode(name, fields);
     }
 
