@@ -88,3 +88,144 @@ raxSeek: Radix tree traversal logic
 streamValidateListpackIntegrity: Data structure validation
 Functions with complexity > 20 should be considered candidates for refactoring to improve maintainability and testability.
 
+
+
+ awk '
+/FILE:/ {f=$2}
+/Summary:/ {
+  e=$2; w=$4; gsub(/[^0-9]/,"",e); gsub(/[^0-9]/,"",w);
+  if (e==0 && w==0) no[++n]=f;
+  else if (e==0 && w>0) warn[++m]=f;
+  else err[++k]=f;
+}
+END{
+  print "=== NO_ERRORS ==="; for(i=1;i<=n;i++) print no[i];
+  print "\n=== ONLY_WARNINGS ==="; for(i=1;i<=m;i++) print warn[i];
+  print "\n=== WITH_ERRORS ==="; for(i=1;i<=k;i++) print err[i];
+}' resultspls/analysis_report.txt
+=== NO_ERRORS ===
+adlist.c
+ae_epoll.c
+ae_evport.c
+ae_kqueue.c
+ae_select.c
+childinfo.c
+cli_commands.c
+commands.c
+crc16.c
+crcspeed.c
+entry.c
+estore.c
+fwtree.c
+lolwut6.c
+lolwut8.c
+lzf_c.c
+lzf_d.c
+rio.c
+setcpuaffinity.c
+sha1.c
+siphash.c
+syscheck.c
+
+=== ONLY_WARNINGS ===
+acl.c
+ae.c
+anet.c
+aof.c
+bio.c
+bitops.c
+call_reply.c
+cli_common.c
+connection.c
+crc64.c
+crccombine.c
+ebuckets.c
+endianconv.c
+evict.c
+geohash.c
+localtime.c
+logreqres.c
+lolwut.c
+lolwut5.c
+memory_prefetch.c
+memtest.c
+monotonic.c
+mt19937-64.c
+multi.c
+notify.c
+rand.c
+redis-benchmark.c
+redis-check-aof.c
+redis-check-rdb.c
+redisassert.c
+release.c
+script_lua.c
+sds.c
+sentinel.c
+setproctitle.c
+sha256.c
+sort.c
+t_set.c
+t_string.c
+threads_mngr.c
+timeout.c
+tracking.c
+unix.c
+
+=== WITH_ERRORS ===
+blocked.c
+chk.c
+cluster.c
+cluster_asm.c
+cluster_legacy.c
+cluster_slot_stats.c
+config.c
+db.c
+debug.c
+defrag.c
+dict.c
+eval.c
+eventnotifier.c
+expire.c
+function_lua.c
+functions.c
+geo.c
+geohash_helper.c
+hotkeys.c
+hyperloglog.c
+intset.c
+iothread.c
+keymeta.c
+kvstore.c
+latency.c
+lazyfree.c
+listpack.c
+module.c
+mstr.c
+networking.c
+object.c
+pqsort.c
+pubsub.c
+quicklist.c
+rax.c
+rdb.c
+redis-cli.c
+replication.c
+resp_parser.c
+script.c
+server.c
+slowlog.c
+socket.c
+sparkline.c
+strl.c
+syncio.c
+t_hash.c
+t_list.c
+t_stream.c
+t_zset.c
+tls.c
+util.c
+ziplist.c
+zipmap.c
+zmalloc.c
+
