@@ -259,9 +259,8 @@ public class SemanticAnalyzer {
             IfStmtNode ifStmt = (IfStmtNode) node;
             
             String condType = inferType(ifStmt.condition);
-            // In C, any pointer/integer type is a valid condition (if (ptr) is legal)
-            if (!condType.equals("int") && !condType.equals("bool")
-                    && !condType.contains("*") && !condType.equals("unknown")) {
+            // In C, any pointer/integer/numeric type is a valid condition (if (ptr) is legal)
+            if (!isNumericOrPointerType(condType)) {
                 addWarning("Condition should be boolean or integer type, got: " + condType);
             }
             
@@ -729,6 +728,21 @@ public class SemanticAnalyzer {
             || r.contains("bool") || r.contains("float") || r.contains("double");
     }
 
+    /** True for any integer-family type (excludes float/double/pointer/struct). */
+    private boolean isIntegerFamilyType(String type) {
+        if (type == null || type.isEmpty()) return false;
+        if (type.equals("unknown")) return false;
+        if (type.contains("*")) return false;
+        if (type.startsWith("struct ") || type.startsWith("enum ")) return false;
+        String r = resolveTypedef(type).toLowerCase();
+        if (r.contains("float") || r.contains("double")) return false;
+        if (r.contains("*")) return false;
+        return r.contains("int") || r.contains("long") || r.contains("short")
+            || r.contains("char") || r.contains("unsigned") || r.contains("size_t")
+            || r.contains("bool") || r.contains("ssize_t") || r.contains("ptrdiff")
+            || r.contains("time_t") || r.contains("off_t") || r.contains("pid_t");
+    }
+
     private boolean isTypeCompatible(String expected, String actual) {
         // Resolve typedefs
         String resolvedExpected = resolveTypedef(expected);
@@ -742,7 +756,27 @@ public class SemanticAnalyzer {
         if (resolvedExpected.equals(resolvedActual)) return true;
 
         if (resolvedExpected.equals("...")) return true;  // Variadic functions can accept any type
-        
+
+        // In C, enum types are integer-compatible. Any "enum ..." type on either side
+        // is compatible with int and other integer types (covers typedef enum { } Name;
+        // where resolveTypedef yields the raw enum body string).
+        boolean expectedIsEnum = resolvedExpected.startsWith("enum ");
+        boolean actualIsEnum   = resolvedActual  .startsWith("enum ");
+        if (expectedIsEnum || actualIsEnum) {
+            // Two different enum types are still compatible (C allows it implicitly)
+            if (expectedIsEnum && actualIsEnum) return true;
+            // enum ↔ any integer-family type
+            Set<String> intFamily = new HashSet<>(Arrays.asList(
+                "int","unsigned","unsigned int","long","unsigned long",
+                "long long","unsigned long long","short","unsigned short",
+                "char","unsigned char","signed char","int8_t","uint8_t",
+                "int16_t","uint16_t","int32_t","uint32_t","int64_t","uint64_t",
+                "size_t","ssize_t","ptrdiff_t","intptr_t","uintptr_t"
+            ));
+            String other = expectedIsEnum ? resolvedActual : resolvedExpected;
+            if (intFamily.contains(other)) return true;
+        }
+
         // Allow implicit conversions
         if (resolvedExpected.equals("double") && resolvedActual.equals("int")) return true;
         if (resolvedExpected.equals("double") && resolvedActual.equals("float")) return true;
@@ -850,6 +884,11 @@ public class SemanticAnalyzer {
             (resolvedExpected.equals("unsigned long long") && resolvedActual.equals("long long"))) {
             return true;
         }
+
+        // Catch-all: all integer-family types are implicitly compatible in C.
+        // This covers fixed-width typedefs (uint64_t, int32_t, mstime_t, etc.) that may not
+        // have been resolved to a primitive if they weren't yet in the symbol table.
+        if (isIntegerFamilyType(resolvedExpected) && isIntegerFamilyType(resolvedActual)) return true;
         
         // A function name used as a value is compatible with any function-pointer parameter
         if (resolvedActual.equals("function_ptr") && resolvedExpected.contains("*")) return true;

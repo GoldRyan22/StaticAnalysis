@@ -120,6 +120,9 @@ public class CustomLibraryResolver {
             
             // Extract #define integer constants (e.g. AL_START_HEAD, AL_START_TAIL)
             extractDefines(content);
+
+            // Extract enum constants (e.g. BLOCKED_NONE, BLOCKED_LIST from typedef enum { ... })
+            extractEnums(content);
             
         } catch (IOException e) {
             System.err.println("Error reading header file: " + headerPath + " - " + e.getMessage());
@@ -133,9 +136,10 @@ public class CustomLibraryResolver {
      * This avoids re-reading the file and reuses the lexer's own output.
      */
     public void extractDefinesFromPreprocessorLines(List<String> lines) {
-        // Join into a single string so extractDefines (which uses MULTILINE mode) works.
+        // Join into a single string so extractDefines/extractEnums (MULTILINE mode) works.
         String content = String.join("\n", lines);
         extractDefines(content);
+        extractEnums(content);
     }
 
     /**
@@ -223,6 +227,45 @@ public class CustomLibraryResolver {
             String type = entry.getValue();
             if (symbolTable.lookup(name) == null) {
                 symbolTable.addSymbol(name, type, "variable");
+            }
+        }
+    }
+
+    /**
+     * Extract enum constants from all enum blocks in content.
+     * Handles:
+     *   typedef enum { A = 0, B, C } TypeName;
+     *   enum Name { A, B, C };
+     *   enum { A = 1, B, C };
+     * Each enumerator name is registered in macroNames (as int).
+     */
+    private void extractEnums(String content) {
+        // Find each 'enum ... {' opening, then balance braces to get the body.
+        Pattern enumStart = Pattern.compile(
+            "\\benum\\b[^{;]*\\{",
+            Pattern.MULTILINE
+        );
+        Matcher m = enumStart.matcher(content);
+        while (m.find()) {
+            int openBrace = m.end() - 1;
+            // Balance braces to find the closing '}'
+            int depth = 0, endPos = -1;
+            for (int i = openBrace; i < content.length(); i++) {
+                char c = content.charAt(i);
+                if (c == '{') depth++;
+                else if (c == '}') { depth--; if (depth == 0) { endPos = i; break; } }
+            }
+            if (endPos == -1) continue;
+
+            String body = content.substring(openBrace + 1, endPos);
+            // Each enumerator is an identifier optionally followed by = value, separated by commas
+            Pattern enumerator = Pattern.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*(?:=[^,}]*)?" );
+            Matcher em = enumerator.matcher(body);
+            while (em.find()) {
+                String name = em.group(1).trim();
+                if (!name.isEmpty()) {
+                    macroNames.add(name);
+                }
             }
         }
     }
