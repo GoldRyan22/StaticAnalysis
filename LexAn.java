@@ -906,6 +906,9 @@ public class LexAn
 {
     List<Token> tokenList = new ArrayList<>();
 
+    /** Raw preprocessor directive lines captured during lexing (e.g. "#define FOO 1"). */
+    List<String> preprocessorLines = new ArrayList<>();
+
     String readLine;
     int lineCount = 0;
     int lineLen;
@@ -916,6 +919,8 @@ public class LexAn
     String TokenValue = "";
 
     States TheState = new State0();
+
+    public List<String> getPreprocessorLines() { return preprocessorLines; }
 
     public List<Token> LexicalAnalysis(String fileName)
     {
@@ -962,6 +967,10 @@ public class LexAn
                     {
                         Token newToken = new Token(lineCount, TokenValue, codeName);
                         tokenList.add(newToken);
+                    }
+                    else if(codeName.equals("PREPROCESSOR"))
+                    {
+                        preprocessorLines.add(TokenValue);
                     }
 
                     if(codeName.equals("COMMENT") || codeName.equals("CT_STRING") || codeName.equals("CT_CHAR")) i++;

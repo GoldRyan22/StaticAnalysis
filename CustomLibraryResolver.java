@@ -14,6 +14,7 @@ public class CustomLibraryResolver {
     private Map<String, String> typedefs;
     private Map<String, CustomStruct> structs;
     private Map<String, Integer> defineConstants;
+    private Set<String> macroNames;   // non-integer #defines (expressions, strings, etc.)
     private Map<String, String> externVariables;
     private Set<String> usedFunctions;
     private Set<String> usedTypes;
@@ -26,6 +27,7 @@ public class CustomLibraryResolver {
         this.typedefs = new HashMap<>();
         this.structs = new HashMap<>();
         this.defineConstants = new HashMap<>();
+        this.macroNames = new HashSet<>();
         this.externVariables = new HashMap<>();
         this.usedFunctions = new HashSet<>();
         this.usedTypes = new HashSet<>();
@@ -123,7 +125,19 @@ public class CustomLibraryResolver {
             System.err.println("Error reading header file: " + headerPath + " - " + e.getMessage());
         }
     }
-    
+
+    /**
+     * Extract #define macros and enum constants from preprocessor lines already
+     * captured by LexAn during lexical analysis of the main source file.
+     * Each entry is a raw directive string such as "#define FOO 42".
+     * This avoids re-reading the file and reuses the lexer's own output.
+     */
+    public void extractDefinesFromPreprocessorLines(List<String> lines) {
+        // Join into a single string so extractDefines (which uses MULTILINE mode) works.
+        String content = String.join("\n", lines);
+        extractDefines(content);
+    }
+
     /**
      * Register an additional directory to search for header files.
      * Useful for -I include paths passed on the command line.
@@ -214,30 +228,64 @@ public class CustomLibraryResolver {
     }
 
     /**
-     * Extract simple integer #define constants.
-     * Pattern: #define NAME integer_value
+     * Extract #define constants.
+     * Handles:
+     *   - Positive integers:  #define FOO 42
+     *   - Negative integers:  #define C_ERR -1
+     *   - Octal literals:     #define FOO 0000002
+     *   - Hex literals:       #define FLAG 0xFF
+     *   - Expressions / other scalar values: registered by name only (as int)
+     * Function-like macros (#define FOO(x) ...) are intentionally skipped.
      */
     private void extractDefines(String content) {
-        // Re-add comments strip per line for #define (removeComments was already called but
-        // the original content passed here has comments stripped already)
+        // Strip block comments before parsing so trailing /* ... */ don't break matching
+        content = content.replaceAll("(?s)/\\*.*?\\*/", "");
+
+        // Match any non-function-like #define: name must NOT be immediately followed by '('
         Pattern definePattern = Pattern.compile(
-            "^#define\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(\\d+)\\s*$",
+            "^#define\\s+([A-Za-z_][A-Za-z0-9_]*)(?!\\()[ \\t]+(.+)$",
             Pattern.MULTILINE
         );
         Matcher matcher = definePattern.matcher(content);
         while (matcher.find()) {
-            String name = matcher.group(1);
-            int value = Integer.parseInt(matcher.group(2));
-            defineConstants.put(name, value);
+            String name  = matcher.group(1);
+            String value = matcher.group(2).trim();
+            // Strip trailing // comment (safety)
+            value = value.replaceAll("//.*$", "").trim();
+            if (value.isEmpty()) continue;
+
+            // Try negative decimal: -1, -2, ...
+            if (value.matches("-\\d+")) {
+                try { defineConstants.put(name, Integer.parseInt(value)); } catch (NumberFormatException e) { macroNames.add(name); }
+            // Try positive decimal (includes octal literals like 0000002 — stored as int)
+            } else if (value.matches("\\d+")) {
+                try { defineConstants.put(name, (int) Long.parseUnsignedLong(value)); } catch (NumberFormatException e) { macroNames.add(name); }
+            // Try hex: 0x... or 0X...
+            } else if (value.matches("0[xX][0-9a-fA-F]+")) {
+                try {
+                    long lv = Long.parseUnsignedLong(value.substring(2), 16);
+                    defineConstants.put(name, (int) lv);
+                } catch (NumberFormatException e) {
+                    macroNames.add(name);
+                }
+            // Anything else (expressions, string literals, references to other defines, etc.)
+            } else {
+                macroNames.add(name);
+            }
         }
     }
-    
+
     /**
-     * Register all known #define integer constants into the symbol table as int variables.
+     * Register all known #define integer constants and scalar macro names into the symbol
+     * table as int variables, so they don't trigger "not declared" warnings.
      */
     public void registerConstants(SymbolTable symbolTable) {
         for (String name : defineConstants.keySet()) {
-            // Only register if not already present
+            if (symbolTable.lookup(name) == null) {
+                symbolTable.addSymbol(name, "int", "variable");
+            }
+        }
+        for (String name : macroNames) {
             if (symbolTable.lookup(name) == null) {
                 symbolTable.addSymbol(name, "int", "variable");
             }

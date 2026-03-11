@@ -66,6 +66,9 @@ public class Main
             // Lexical Analysis
             LexAn lex = new LexAn();
             List<Token> tokens = lex.LexicalAnalysis(filename);
+            // Extract #define / enum constants from the source file using the
+            // preprocessor lines the lexer already captured — no need to re-read.
+            customResolver.extractDefinesFromPreprocessorLines(lex.getPreprocessorLines());
             
             // Syntactic Analysis
             Parser parser = new Parser(tokens, externalTypes);

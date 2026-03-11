@@ -275,8 +275,8 @@ public class Parser
                     continue;
                 }
                 String fieldName = consume("ID", "Expect field name").value.toString();
-                // Skip optional array brackets
-                if (check("LBRACKET")) {
+                // Skip optional array brackets (loop for multi-dimensional arrays)
+                while (check("LBRACKET")) {
                     while (!check("RBRACKET") && !isAtEnd()) advance();
                     advance(); // consume ]
                 }
@@ -290,8 +290,8 @@ public class Parser
             if (check("ID")) {
                 newTypeName = advance().value.toString();
             }
-            // Skip optional array brackets and initializer
-            if (check("LBRACKET")) {
+            // Skip optional array brackets and initializer (loop for multi-dimensional)
+            while (check("LBRACKET")) {
                 while (!check("RBRACKET") && !isAtEnd()) advance();
                 advance(); // consume ]
             }
@@ -336,8 +336,8 @@ public class Parser
         }
         Token newTypeNameTk = consume("ID", "Expect new type name after base type in typedef");
         String newTypeName = newTypeNameTk.value.toString();
-        // Skip optional array brackets for typedef'd array types
-        if (check("LBRACKET")) {
+        // Skip optional array brackets for typedef'd array types (loop for multi-dimensional)
+        while (check("LBRACKET")) {
             while (!check("RBRACKET") && !isAtEnd()) advance();
             advance();
         }
@@ -374,8 +374,8 @@ public class Parser
                     continue;
                 }
                 String argName = consume("ID", "Expect argument name").value.toString();
-                // Skip optional array brackets in parameter (e.g., char *[])
-                if (check("LBRACKET")) {
+                // Skip optional array brackets in parameter (loop for multi-dimensional)
+                while (check("LBRACKET")) {
                     while (!check("RBRACKET") && !isAtEnd()) advance();
                     advance(); // consume ]
                 }
@@ -420,7 +420,8 @@ public class Parser
     private VarDeclNode parseOneVar(String baseType, String name) {
         String currentType = baseType;
 
-        if (match("LBRACKET")) {
+        // Loop to handle multi-dimensional arrays: T name[D1][D2][D3]...
+        while (match("LBRACKET")) {
             // Empty brackets [] means unsized array
             if (match("RBRACKET")) {
                 currentType += "[]";

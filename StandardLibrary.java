@@ -1107,7 +1107,7 @@ public class StandardLibrary {
             }
         }
         
-        // Register used functions
+        // Register used functions (and any typedefs that appear in their signatures)
         for (String funcName : usedFunctions) {
             if (functions.containsKey(funcName)) {
                 LibraryFunction func = functions.get(funcName);
@@ -1115,6 +1115,11 @@ public class StandardLibrary {
                 symbol.returnType = func.returnType;
                 symbol.paramTypes.addAll(func.paramTypes);
                 symbolTable.addSymbol(symbol);
+                // Ensure typedefs used in return/param types are resolvable
+                registerTypedefIfKnown(func.returnType, symbolTable);
+                for (String paramType : func.paramTypes) {
+                    registerTypedefIfKnown(paramType, symbolTable);
+                }
             }
         }
         
@@ -1124,6 +1129,18 @@ public class StandardLibrary {
         }
     }
     
+    /** Register a typedef by name into the symbol table if this library knows about it. */
+    private void registerTypedefIfKnown(String type, SymbolTable symbolTable) {
+        if (type == null) return;
+        // Strip pointer/array qualifiers to get the base type name
+        String base = type.replaceAll("\\*.*", "").replaceAll("\\[.*", "")
+                          .replaceAll("\\bconst\\b", "").replaceAll("\\bstruct\\b", "").trim();
+        if (!base.isEmpty() && typedefs.containsKey(base)
+                && symbolTable.lookupTypedef(base) == null) {
+            symbolTable.addSymbol(base, typedefs.get(base), "typedef");
+        }
+    }
+
     public boolean isStandardFunction(String name) {
         return functions.containsKey(name);
     }
