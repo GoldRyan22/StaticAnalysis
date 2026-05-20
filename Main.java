@@ -7,20 +7,32 @@ public class Main
     public static void main(String[] args) 
     {
         if (args.length == 0) {
-            System.out.println("Usage: java Main <source_file.c>");
+            System.out.println("Usage: java Main <source_file.c | directory>");
             System.out.println("\nAvailable options:");
             System.out.println("  --ast          Show AST only");
             System.out.println("  --semantic     Show semantic analysis only");
             System.out.println("  --cfg          Show CFG only");
+            System.out.println("  --dep          Show dependency graph");
             System.out.println("  --all          Show everything (default)");
+            System.out.println("\nFolder mode: pass a directory to generate a combined dependency graph");
+            System.out.println("  for all .c files in that directory.");
             return;
         }
         
         String filename = args[0];
+
+        // ----- Folder-wide dependency analysis -----
+        java.io.File inputFile = new java.io.File(filename);
+        if (inputFile.isDirectory()) {
+            analyzeDirectory(inputFile, args);
+            return;
+        }
+
         boolean showAst = hasFlag(args, "--ast");
         boolean showSemantic = hasFlag(args, "--semantic");
         boolean showCfg = hasFlag(args, "--cfg");
-        boolean showAll = hasFlag(args, "--all") || (!showAst && !showSemantic && !showCfg);
+        boolean showDep = hasFlag(args, "--dep");
+        boolean showAll = hasFlag(args, "--all") || (!showAst && !showSemantic && !showCfg && !showDep);
         
         try 
         {
@@ -75,8 +87,39 @@ public class Main
             ProgramNode tree = (ProgramNode) parser.parse();
             
             System.out.println("  STATIC ANALYSIS TOOL FOR C   ");
-         
-            
+
+            // File Metrics
+            System.out.println("\n" + "=".repeat(60));
+            System.out.println("  FILE METRICS");
+            System.out.println("=".repeat(60));
+            System.out.println(String.format("  %-20s %s", "File:", filename));
+            System.out.println(String.format("  %-20s %d", "Lines of Code (LOC):", lex.getLineCount()));
+            System.out.println(String.format("  %-20s %d", "Tokens:", tokens.size()));
+            System.out.println("=".repeat(60));
+
+            // Dependency Graph
+            if (showAll || showDep) {
+                System.out.println("\n" + "=".repeat(60));
+                System.out.println("  DEPENDENCY GRAPH");
+                System.out.println("=".repeat(60));
+
+                DependencyGraph dg = new DependencyGraph();
+                // Propagate include search paths (reuse sourceDir already declared above)
+                dg.addSearchDirectory(new java.io.File(filename).getAbsoluteFile().getParent());
+                for (int i = 1; i < args.length; i++) {
+                    String arg = args[i];
+                    if (arg.startsWith("-I")) {
+                        String iDir = arg.length() > 2 ? arg.substring(2) : (i + 1 < args.length ? args[++i] : null);
+                        if (iDir != null) dg.addSearchDirectory(iDir);
+                    }
+                }
+                dg.addSourceFile(filename);
+                dg.printSummary();
+
+                String baseName = "dep_" + new java.io.File(filename).getName().replaceAll("\\.c$", "");
+                DependencyGraph.generateFiles(dg, baseName);
+            }
+
             // Show AST
             if (showAll || showAst) {
                 System.out.println("\n" + "=".repeat(60));
@@ -179,6 +222,55 @@ public class Main
         }
     }
     
+    // ------------------------------------------------------------------ folder mode
+
+    /**
+     * Folder-wide analysis: build a combined dependency graph for every .c file
+     * found (non-recursively) in the given directory, then output it as a single
+     * DOT / PNG file.
+     */
+    private static void analyzeDirectory(java.io.File dir, String[] args) {
+        System.out.println("  STATIC ANALYSIS TOOL FOR C   ");
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("  FOLDER DEPENDENCY GRAPH");
+        System.out.println("=".repeat(60));
+        System.out.println("  Directory: " + dir.getAbsolutePath());
+
+        java.io.File[] cFiles = dir.listFiles(f -> f.isFile() && f.getName().endsWith(".c"));
+        if (cFiles == null || cFiles.length == 0) {
+            System.out.println("  No .c files found in directory.");
+            return;
+        }
+
+        Arrays.sort(cFiles);   // deterministic order
+
+        DependencyGraph dg = new DependencyGraph();
+        // Propagate any -I include paths from command line
+        for (int i = 1; i < args.length; i++) {
+            String arg = args[i];
+            if (arg.startsWith("-I")) {
+                String iDir = arg.length() > 2 ? arg.substring(2) : (i + 1 < args.length ? args[++i] : null);
+                if (iDir != null) dg.addSearchDirectory(iDir);
+            }
+        }
+        dg.addSearchDirectory(dir.getAbsolutePath());
+
+        for (java.io.File f : cFiles) {
+            System.out.println("  Adding: " + f.getName());
+            dg.addSourceFile(f.getAbsolutePath());
+        }
+
+        System.out.println();
+        dg.printSummary();
+
+        String baseName = "dep_" + dir.getName();
+        DependencyGraph.generateFiles(dg, baseName);
+
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("✓ Folder dependency graph complete");
+        System.out.println("=".repeat(60));
+    }
+
     private static boolean hasFlag(String[] args, String flag) {
         for (String arg : args) {
             if (arg.equals(flag)) return true;

@@ -922,6 +922,8 @@ public class LexAn
 
     public List<String> getPreprocessorLines() { return preprocessorLines; }
 
+    public int getLineCount() { return lineCount; }
+
     public List<Token> LexicalAnalysis(String fileName)
     {
         try 

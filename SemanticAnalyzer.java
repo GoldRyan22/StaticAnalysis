@@ -156,6 +156,7 @@ public class SemanticAnalyzer {
     
     private void analyzeFunctionBody(FuncDeclNode node) {
         currentFunction = node.name;
+        aliasTable.resetForNewFunction(); // clear per-pointer state from previous function
         symbolTable.enterScope();
         try {
             // Add parameters to scope
@@ -877,6 +878,24 @@ public class SemanticAnalyzer {
             String baseExpected = resolvedExpected.replaceAll("\\s*\\*+\\s*", "").trim();
             String baseActual   = resolvedActual.replaceAll("\\s*\\[.*?\\]\\s*", "").trim();
             if (baseExpected.equals(baseActual)) return true;
+        }
+        // char* is assignment-compatible with char[] / char[N] (pointer ↔ array decay in C)
+        // Also handles the reverse: expected is array, actual is pointer (e.g. char buf[4] = someCharPtr)
+        if (resolvedExpected.contains("[") && resolvedActual.contains("*")) {
+            String baseExpected = resolvedExpected.replaceAll("\\s*\\[.*?\\]\\s*", "").trim();
+            String baseActual   = resolvedActual.replaceAll("\\s*\\*+\\s*", "").trim();
+            if (baseExpected.equals(baseActual)) return true;
+        }
+        // char* ↔ char[] with const-stripped variants
+        {
+            String seExp = strippedExpected.replaceAll("\\s*\\[.*?\\]\\s*", "").trim();
+            String seAct = strippedActual.replaceAll("\\s*\\[.*?\\]\\s*", "").trim();
+            String spExp = strippedExpected.replaceAll("\\s*\\*+\\s*", "").trim();
+            String spAct = strippedActual.replaceAll("\\s*\\*+\\s*", "").trim();
+            if ((strippedExpected.contains("[") && strippedActual.contains("*") && seExp.equals(spAct)) ||
+                (strippedActual.contains("[") && strippedExpected.contains("*") && seAct.equals(spExp))) {
+                return true;
+            }
         }
 
         // unsigned long long / long long are assignment-compatible

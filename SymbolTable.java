@@ -316,6 +316,16 @@ class AliasTable {
         useAfterFree.add(description);
     }
     
+    /**
+     * Reset per-pointer tracking when entering a new function scope.
+     * Clears the alias map so freed/heap state from a previous function
+     * does not leak into the next one. Accumulated error/warning lists
+     * (doubleFree, useAfterFree, memoryLeaks, etc.) are intentionally kept.
+     */
+    public void resetForNewFunction() {
+        aliases.clear();
+    }
+
     public void markVoidPointer(String pointerName) {
         if (aliases.containsKey(pointerName)) {
             aliases.get(pointerName).isVoid = true;
