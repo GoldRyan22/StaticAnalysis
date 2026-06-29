@@ -151,6 +151,33 @@ def _write_function_files(functions, output_dir):
     return batch_num
 
 
+def parse_report_sections(report_content):
+    """
+    Split the report content by the file header markers.
+    Returns list of dicts: [{'file': 'acl.c', 'content': '...'}, ...]
+    """
+    import re
+    # We look for a pattern of "═" box lines followed by FILE: filename followed by "═" box lines
+    pattern = r'[═=]{15,}\s*\n\s*FILE:\s*([^\n]+)\s*\n\s*[═=]{15,}'
+    
+    matches = list(re.finditer(pattern, report_content))
+    if not matches:
+        return [{'file': 'Loaded Report', 'content': report_content}]
+        
+    sections = []
+    for i, match in enumerate(matches):
+        filename = match.group(1).strip()
+        start_idx = match.end()
+        end_idx = matches[i+1].start() if i + 1 < len(matches) else len(report_content)
+        file_content = report_content[start_idx:end_idx].strip()
+        
+        sections.append({
+            'file': filename,
+            'content': file_content
+        })
+    return sections
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ModernScrollableFrame(ctk.CTkScrollableFrame):
@@ -171,11 +198,19 @@ class FileTreeItem(ctk.CTkFrame):
         self.configure(fg_color="transparent", height=28)
         self.pack_propagate(False)
         
+        # Checkbox for multiselection
+        self.checkbox_var = ctk.BooleanVar(value=False)
+        self.checkbox = ctk.CTkCheckBox(self, text="", variable=self.checkbox_var,
+                                        width=20, corner_radius=3, border_width=1,
+                                        fg_color=COLORS["accent"],
+                                        hover_color=COLORS["accent_hover"])
+        self.checkbox.pack(side="left", padx=(5, 2))
+        
         # File icon (using emoji as simple icon)
         icon = "📄" if filepath.endswith('.c') else "📁"
         self.icon_label = ctk.CTkLabel(self, text=icon, width=24, 
                                         font=ctk.CTkFont(size=12))
-        self.icon_label.pack(side="left", padx=(5, 2))
+        self.icon_label.pack(side="left", padx=(2, 2))
         
         # Filename
         self.name_label = ctk.CTkLabel(self, text=filename, 
@@ -359,6 +394,24 @@ class AnalysisPanel(ctk.CTkFrame):
         self.file_tree = ModernScrollableFrame(self, height=200)
         self.file_tree.pack(fill="both", expand=True, padx=5, pady=5)
         
+        # Select All / Clear All buttons
+        select_actions = ctk.CTkFrame(self, fg_color="transparent", height=24)
+        select_actions.pack(fill="x", padx=5, pady=(0, 2))
+        
+        self.select_all_btn = ctk.CTkButton(select_actions, text="☑ Select All", width=95, height=22,
+                                             font=ctk.CTkFont(size=10),
+                                             fg_color=COLORS["bg_medium"],
+                                             hover_color=COLORS["accent"],
+                                             command=self.select_all_files)
+        self.select_all_btn.pack(side="left", padx=2)
+        
+        self.deselect_all_btn = ctk.CTkButton(select_actions, text="☐ Clear All", width=95, height=22,
+                                               font=ctk.CTkFont(size=10),
+                                               fg_color=COLORS["bg_medium"],
+                                               hover_color=COLORS["error"],
+                                               command=self.deselect_all_files)
+        self.deselect_all_btn.pack(side="left", padx=2)
+        
         # Selected file display
         selected_frame = ctk.CTkFrame(self, fg_color=COLORS["bg_medium"], 
                                       corner_radius=8)
@@ -397,6 +450,21 @@ class AnalysisPanel(ctk.CTkFrame):
                                          text_color=COLORS["text"],
                                          wraplength=280)
         self.output_label.pack(anchor="w", padx=10, pady=(0, 5))
+        
+        # LLM Option Checkbox Frame
+        llm_option_frame = ctk.CTkFrame(self, fg_color=COLORS["bg_medium"], corner_radius=8)
+        llm_option_frame.pack(fill="x", padx=5, pady=5)
+        
+        self.llm_individual_var = ctk.BooleanVar(value=False)
+        self.llm_individual_checkbox = ctk.CTkCheckBox(
+            llm_option_frame,
+            text="Send LLM analysis individually per file",
+            variable=self.llm_individual_var,
+            font=ctk.CTkFont(size=11),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"]
+        )
+        self.llm_individual_checkbox.pack(padx=10, pady=8, anchor="w")
         
         # Analyze buttons
         self.analyze_btn = ctk.CTkButton(self, text="▶  Analyze Selected",
@@ -464,6 +532,16 @@ class AnalysisPanel(ctk.CTkFrame):
             item.pack(fill="x", pady=1)
             self.file_items.append(item)
     
+    def select_all_files(self):
+        for item in self.file_items:
+            if hasattr(item, 'checkbox'):
+                item.checkbox.select()
+                
+    def deselect_all_files(self):
+        for item in self.file_items:
+            if hasattr(item, 'checkbox'):
+                item.checkbox.deselect()
+
     def on_file_click(self, item):
         # Deselect all
         for fi in self.file_items:
@@ -483,12 +561,174 @@ class AnalysisPanel(ctk.CTkFrame):
         self.progress.start()
 
     def start_analysis(self):
-        if not self.selected_file:
-            messagebox.showwarning("No File", "Please select a C file first")
+        # Check if multiple files are selected via checkboxes
+        checked_files = [item.filepath for item in self.file_items if item.checkbox_var.get()]
+        if checked_files:
+            self._disable_buttons()
+            thread = threading.Thread(target=self.run_multiple_files_analysis, args=(checked_files,), daemon=True)
+            thread.start()
+        elif self.selected_file:
+            self._disable_buttons()
+            thread = threading.Thread(target=self.run_analysis, daemon=True)
+            thread.start()
+        else:
+            messagebox.showwarning("No Selection", "Please select or check at least one C file first")
             return
-        self._disable_buttons()
-        thread = threading.Thread(target=self.run_analysis, daemon=True)
-        thread.start()
+
+    def run_multiple_files_analysis(self, filepaths):
+        """Analyze a specific list of checked C files."""
+        try:
+            c_files = [Path(fp) for fp in filepaths]
+            
+            if not self.output_dir:
+                if self.selected_folder:
+                    self.output_dir = os.path.join(self.selected_folder, "analysis_results")
+                else:
+                    self.output_dir = os.path.join(os.path.dirname(filepaths[0]), "analysis_results")
+            os.makedirs(self.output_dir, exist_ok=True)
+
+            self.app.log_message("\n"+ "━"* 50)
+            self.app.log_message(f"Selected Files Analysis — {len(c_files)} file(s)")
+            self.app.log_message(f"Output : {self.output_dir}")
+            self.app.log_message("━" * 50)
+
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+
+            # Compile Java first if needed
+            self.app.log_message("\nChecking Java compilation...")
+            main_class = os.path.join(script_dir, "Main.class")
+            main_java  = os.path.join(script_dir, "Main.java")
+            if not os.path.exists(main_class) or \
+               os.path.getmtime(main_java) > os.path.getmtime(main_class):
+                java_files = glob.glob(os.path.join(script_dir, '*.java'))
+                result = subprocess.run(
+                    ['javac'] + java_files,
+                    capture_output=True, text=True, cwd=script_dir
+                )
+                if result.returncode != 0:
+                    raise Exception(f"Compilation failed: {result.stderr}")
+                self.app.log_message("Compiled")
+            else:
+                self.app.log_message("Already compiled")
+
+            # Sequential analysis of selected files
+            combined_sections = []
+            errors_total = warnings_total = 0
+            original_dir = os.getcwd()
+
+            for idx, c_file in enumerate(c_files, 1):
+                self.app.log_message(f"\n[{idx}/{len(c_files)}] {c_file.name}")
+                try:
+                    os.chdir(script_dir)
+                    
+                    # Preprocess for each file if preprocess.sh exists
+                    preprocess_script = os.path.join(script_dir, "preprocess.sh")
+                    base_name = c_file.name
+                    file_dir = os.path.dirname(str(c_file))
+                    preprocessed_file = os.path.join(
+                        file_dir, base_name.replace('.c', '_preprocessed.c')
+                    )
+                    
+                    if os.path.exists(preprocess_script):
+                        result = subprocess.run(
+                            ['bash', preprocess_script, str(c_file)],
+                            capture_output=True, text=True, cwd=script_dir
+                        )
+                        if result.returncode != 0:
+                            preprocessed_file = str(c_file)
+                    else:
+                        preprocessed_file = str(c_file)
+
+                    result = subprocess.run(
+                        ['java', 'Main', preprocessed_file, '--all'],
+                        capture_output=True, text=True, timeout=60
+                    )
+
+                    stderr_block = ""
+                    if result.stderr and result.stderr.strip():
+                        stderr_block = "\n--- ERRORS / WARNINGS ---\n" + result.stderr.strip() + "\n"
+
+                    section = (
+                        f"{'═' * 60}\n"
+                        f"  FILE: {c_file.name}\n"
+                        f"{'═' * 60}\n"
+                        + (result.stdout or "(no stdout output)\n")
+                        + stderr_block
+                        + "\n"
+                    )
+                    combined_sections.append(section)
+
+                    m = re.search(r'(\d+) error.*?(\d+) warning', result.stdout or '')
+                    if m:
+                        errors_total   += int(m.group(1))
+                        warnings_total += int(m.group(2))
+
+                    stem = c_file.stem
+                    moved = 0
+                    for pattern in ['cfg_*.dot', 'cfg_*.png', 'dep_*.dot', 'dep_*.png']:
+                        for f in glob.glob(pattern):
+                            basename = os.path.basename(f)
+                            dest = os.path.join(self.output_dir, f"{stem}__{basename}")
+                            if os.path.exists(dest):
+                                name, ext = os.path.splitext(f"{stem}__{basename}")
+                                counter = 2
+                                while os.path.exists(dest):
+                                    dest = os.path.join(self.output_dir, f"{name}_{counter}{ext}")
+                                    counter += 1
+                            os.rename(f, dest)
+                            moved += 1
+
+                    self.app.log_message(f"Done ({moved} CFG + dep file(s) saved)")
+
+                except subprocess.TimeoutExpired:
+                    combined_sections.append(f"FILE: {c_file.name}\n❌ Timed out\n\n")
+                    self.app.log_message(f"Timed out")
+                except Exception as e:
+                    combined_sections.append(f"FILE: {c_file.name}\n❌ Error: {e}\n\n")
+                    self.app.log_message(f"Error: {e}")
+                finally:
+                    os.chdir(original_dir)
+
+            # Write combined report
+            header = (
+                f"SELECTED FILES ANALYSIS REPORT\n"
+                f"Generated : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Files     : {len(c_files)}\n"
+                f"Total errors: {errors_total}   warnings: {warnings_total}\n"
+                + "━" * 60 + "\n\n"
+            )
+            report_file = os.path.join(self.output_dir, 'analysis_report.txt')
+            with open(report_file, 'w') as fh:
+                fh.write(header)
+                fh.writelines(combined_sections)
+
+            # Extract functions from each selected file → combined txt files for AI analysis
+            self.app.log_message("\n[+] Extracting function data from selected files...")
+            all_functions = []
+            for c_file in c_files:
+                all_functions.extend(_extract_c_functions(str(c_file)))
+            if all_functions:
+                batches = _write_function_files(all_functions, self.output_dir)
+                self.app.log_message(
+                    f"      ✓ {len(all_functions)} total function(s) → "
+                    f"function_names.txt + {batches} implementation batch(es)"
+                )
+            else:
+                self.app.log_message("No functions extracted from selected sources")
+
+            self.app.log_message("\n"+ "━"* 50)
+            self.app.log_message(f"SELECTED FILES ANALYSIS COMPLETE")
+            self.app.log_message(f"{len(c_files)} file(s) · {errors_total} error(s) · {warnings_total} warning(s)")
+            self.app.log_message("━" * 50)
+
+            self.app.after(100, lambda: self.app.results_panel.load_results(self.output_dir))
+
+        except Exception as e:
+            self.app.log_message(f"\nError: {str(e)}")
+            import traceback
+            self.app.log_message(traceback.format_exc())
+        finally:
+            self.app.after(0, self.finish_analysis)
 
     def start_folder_analysis(self):
         if not self.selected_folder:
@@ -577,11 +817,15 @@ class AnalysisPanel(ctk.CTkFrame):
                     # Save report (stdout + any stderr errors)
                     report_file = os.path.join(self.output_dir, 'analysis_report.txt')
                     with open(report_file, 'w') as f:
-                        f.write(result.stdout or "")
+                        section = (
+                            f"{'═' * 60}\n"
+                            f"  FILE: {os.path.basename(self.selected_file)}\n"
+                            f"{'═' * 60}\n"
+                            + (result.stdout or "")
+                        )
                         if result.stderr and result.stderr.strip():
-                            f.write("\n--- ERRORS / WARNINGS ---\n")
-                            f.write(result.stderr.strip())
-                            f.write("\n")
+                            section += "\n--- ERRORS / WARNINGS ---\n" + result.stderr.strip() + "\n"
+                        f.write(section)
                     self.app.log_message("Analysis report saved")
                 
                 # Move output files
@@ -915,8 +1159,8 @@ class ResultsPanel(ctk.CTkFrame):
                      hover_color=COLORS["accent"],
                      command=self.browse_results).pack(side="right", padx=10, pady=6)
         
-        # Main content with tabs
-        self.tabview = ctk.CTkTabview(self, fg_color=COLORS["bg_dark"])
+        # Main content with tabs (binding tab switch command)
+        self.tabview = ctk.CTkTabview(self, fg_color=COLORS["bg_dark"], command=self.on_tab_changed)
         self.tabview.pack(fill="both", expand=True, padx=5, pady=5)
         
         # Report tab - SPLIT VIEW (Static Analysis | LLM Analysis)
@@ -926,10 +1170,14 @@ class ResultsPanel(ctk.CTkFrame):
         report_main_frame = ctk.CTkFrame(self.report_tab, fg_color="transparent")
         report_main_frame.pack(fill="both", expand=True)
         
+        # Left container frame (so we can pack log panel vertically on left)
+        self.left_col_frame = ctk.CTkFrame(report_main_frame, fg_color="transparent")
+        self.left_col_frame.pack(side="left", fill="both", expand=True)
+
         # Left side - Static Analysis Report
-        left_report_frame = ctk.CTkFrame(report_main_frame, fg_color=COLORS["bg_medium"],
+        left_report_frame = ctk.CTkFrame(self.left_col_frame, fg_color=COLORS["bg_medium"],
                                          corner_radius=8)
-        left_report_frame.pack(side="left", fill="both", expand=True, padx=(5, 2), pady=5)
+        left_report_frame.pack(fill="both", expand=True, padx=(5, 2), pady=5)
         
         # Left header
         left_header = ctk.CTkFrame(left_report_frame, fg_color=COLORS["bg_light"],
@@ -1129,7 +1377,7 @@ class ResultsPanel(ctk.CTkFrame):
                                        font=ctk.CTkFont(family="Consolas", size=11),
                                        fg_color=COLORS["bg_dark"],
                                        text_color=COLORS["text"])
-        self.llm_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.llm_text.pack(fill="both", expand=True, padx=8, pady=(0, 6))
         self.llm_text.insert("1.0", "LLM Analysis will appear here.\n\n" +
                             "Click '▶ Analyze' to run local LLM analysis.\n\n" +
                             "Requirements:\n" +
@@ -1140,6 +1388,45 @@ class ResultsPanel(ctk.CTkFrame):
                             "• Potential bugs\n" +
                             "• Security vulnerabilities\n" +
                             "• Improvement suggestions")
+        
+        # Custom prompt / question panel
+        custom_prompt_frame = ctk.CTkFrame(right_report_frame, fg_color=COLORS["bg_dark"], corner_radius=6)
+        custom_prompt_frame.pack(fill="x", padx=8, pady=(0, 8))
+        
+        # Header for custom prompt
+        cp_header = ctk.CTkFrame(custom_prompt_frame, fg_color="transparent", height=24)
+        cp_header.pack(fill="x", padx=5, pady=2)
+        cp_header.pack_propagate(False)
+        ctk.CTkLabel(cp_header, text="💬 Ask a custom question:", 
+                     font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=COLORS["text"]).pack(side="left")
+        
+        # Row for entry and buttons
+        cp_content = ctk.CTkFrame(custom_prompt_frame, fg_color="transparent")
+        cp_content.pack(fill="x", padx=5, pady=2)
+        
+        self.custom_prompt_text = ctk.CTkTextbox(cp_content, height=60,
+                                                 font=ctk.CTkFont(size=11),
+                                                 fg_color=COLORS["bg_medium"],
+                                                 text_color=COLORS["text_bright"])
+        self.custom_prompt_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        
+        cp_buttons = ctk.CTkFrame(cp_content, fg_color="transparent")
+        cp_buttons.pack(side="right", fill="y")
+        
+        self.send_prompt_btn = ctk.CTkButton(cp_buttons, text="Send", width=70, height=26,
+                                             font=ctk.CTkFont(size=11, weight="bold"),
+                                             fg_color=COLORS["success"],
+                                             hover_color="#5AAC64",
+                                             command=self.send_custom_prompt)
+        self.send_prompt_btn.pack(pady=1)
+        
+        self.clear_prompt_btn = ctk.CTkButton(cp_buttons, text="Clear", width=70, height=24,
+                                              font=ctk.CTkFont(size=10),
+                                              fg_color=COLORS["bg_light"],
+                                              hover_color=COLORS["error"],
+                                              command=self.clear_custom_prompt)
+        self.clear_prompt_btn.pack(pady=1)
         
         # CFG Gallery tab - VERTICAL LAYOUT (list on left, viewer on right)
         self.cfg_tab = self.tabview.add("🔀 Control Flow Graphs")
@@ -1806,7 +2093,15 @@ class ResultsPanel(ctk.CTkFrame):
             if self.results_dir else None
         )
 
-        if names_file and os.path.exists(names_file):
+        # Force report fallback if we are specifically analyzing report content based on checkboxes/selections
+        # to ensure static analysis report gets analyzed by the LLM as requested.
+        has_focused_selection = False
+        if hasattr(self.app, 'analysis_panel') and self.app.analysis_panel:
+            checked_files = [item.filepath for item in self.app.analysis_panel.file_items if item.checkbox_var.get()]
+            if checked_files or self.app.analysis_panel.selected_file:
+                has_focused_selection = True
+
+        if names_file and os.path.exists(names_file) and not has_focused_selection:
             # ── AI analysis path ──────────────────────────────────────────
             with open(names_file) as fh:
                 func_names = [ln.strip() for ln in fh if ln.strip()]
@@ -1828,8 +2123,8 @@ class ResultsPanel(ctk.CTkFrame):
             )
             thread.start()
         else:
-            # ── Ollama fallback ───────────────────────────────────────────
-            report_content = self.report_text.get("1.0", "end").strip()
+            # ── Ollama fallback / Static Analysis Report ──────────────────
+            report_content, targets = self._get_target_report_content()
             if not report_content or "No analysis report" in report_content:
                 self.llm_text.delete("1.0", "end")
                 self.llm_text.insert(
@@ -1846,7 +2141,7 @@ class ResultsPanel(ctk.CTkFrame):
             self.llm_text.delete("1.0", "end")
             self.llm_text.insert(
                 "1.0",
-                "🔄 Running LLM analysis…\n\nThis may take a moment depending on your hardware.",
+                f"🔄 Running LLM analysis for {', '.join(targets)}…\n\nThis may take a moment depending on your hardware.",
             )
             thread = threading.Thread(
                 target=self._run_llm_thread, args=(report_content,), daemon=True
@@ -2071,22 +2366,40 @@ class ResultsPanel(ctk.CTkFrame):
         if path:
             self.gguf_path_var.set(path)
 
-    def _build_analysis_prompt(self, report_content):
-        return (
-            "You are a code analysis expert. Analyze the following static analysis "
-            "report from a C code analyzer.\n\n"
-            "Provide insights on:\n"
-            "1. **Code Quality Summary** - Overall assessment of the code\n"
-            "2. **Potential Issues** - Any bugs, vulnerabilities, or problems identified\n"
-            "3. **Complexity Analysis** - Comment on the cyclomatic complexity values\n"
-            "4. **Security Concerns** - Any security-related observations\n"
-            "5. **Recommendations** - Suggestions for improvement\n\n"
-            "Be concise but thorough. Format your response with clear sections.\n\n"
-            "=== STATIC ANALYSIS REPORT ===\n"
-            f"{report_content[:4000]}\n"
-            "=== END REPORT ===\n\n"
-            "Provide your analysis:"
-        )
+    def _build_analysis_prompt(self, report_content, custom_prompt=None):
+        if custom_prompt:
+            if not report_content:
+                return (
+                    "You are a code analysis expert. The user has asked the following custom "
+                    "question/prompt. Please assist them:\n\n"
+                    f"{custom_prompt}"
+                )
+            return (
+                "You are a code analysis expert. Below is the static analysis report "
+                "from a C code analyzer, followed by a custom question/prompt from the user.\n\n"
+                "=== STATIC ANALYSIS REPORT ===\n"
+                f"{report_content[:80000]}\n"
+                "=== END REPORT ===\n\n"
+                "User's Question / Custom Prompt:\n"
+                f"{custom_prompt}\n\n"
+                "Please answer the user's question, keeping the static analysis report context in mind:"
+            )
+        else:
+            return (
+                "You are a code analysis expert. Analyze the following static analysis "
+                "report from a C code analyzer.\n\n"
+                "Provide insights on:\n"
+                "1. **Code Quality Summary** - Overall assessment of the code\n"
+                "2. **Potential Issues** - Any bugs, vulnerabilities, or problems identified\n"
+                "3. **Complexity Analysis** - Comment on the cyclomatic complexity values\n"
+                "4. **Security Concerns** - Any security-related observations\n"
+                "5. **Recommendations** - Suggestions for improvement\n\n"
+                "Be concise but thorough. Format your response with clear sections.\n\n"
+                "=== STATIC ANALYSIS REPORT ===\n"
+                f"{report_content[:80000]}\n"
+                "=== END REPORT ===\n\n"
+                "Provide your analysis:"
+            )
 
     def _call_api_llm(self, prompt):
         """Send prompt to an OpenAI-compatible or Anthropic REST API.
@@ -2154,26 +2467,184 @@ class ResultsPanel(ctk.CTkFrame):
 
     # ── Ollama / API thread ───────────────────────────────────────────────────
 
-    def _run_llm_thread(self, report_content):
-        """Thread worker for LLM analysis"""
-        try:
-            model = self.llm_model_var.get()
+    def on_tab_changed(self):
+        """Callback triggered when the user switches tabs"""
+        if not hasattr(self.app, 'log_panel') or self.app.log_panel is None:
+            return
+            
+        current_tab = self.tabview.get()
+        if current_tab == "📝 Analysis Report":
+            self.app.log_panel.pack_forget()
+            self.app.log_panel.pack(in_=self.left_col_frame, fill="x", side="bottom", padx=(5, 2), pady=(0, 5))
+        else:
+            self.app.log_panel.pack_forget()
+            if hasattr(self.app, 'statusbar') and self.app.statusbar:
+                self.app.log_panel.pack(in_=self.app, fill="x", padx=5, pady=(0, 5), before=self.app.statusbar)
+            else:
+                self.app.log_panel.pack(in_=self.app, fill="x", padx=5, pady=(0, 5))
 
+    def _get_target_report_content(self):
+        """
+        Gathers report content based on checked/selected files in Project Explorer.
+        Returns (report_text, targets_list)
+        """
+        # Determine target filenames from project explorer
+        checked_files = []
+        if hasattr(self.app, 'analysis_panel') and self.app.analysis_panel:
+            checked_files = [os.path.basename(item.filepath) for item in self.app.analysis_panel.file_items if item.checkbox_var.get()]
+            
+        # If no files are checked, see if one file is selected/clicked
+        if not checked_files and hasattr(self.app, 'analysis_panel') and self.app.analysis_panel:
+            if self.app.analysis_panel.selected_file:
+                checked_files = [os.path.basename(self.app.analysis_panel.selected_file)]
+                
+        # If still none, check what the dropdown in the results tab is showing
+        if not checked_files:
+            dropdown_selected = self.file_filter_var.get()
+            if dropdown_selected and dropdown_selected != "All Files":
+                checked_files = [dropdown_selected]
+
+        # If still empty or "All Files", use the entire report context.
+        if not checked_files:
+            return self._all_report_text, ["All Files"]
+            
+        # Assemble sections for the chosen files
+        output_parts = []
+        actual_targets = []
+        
+        # Ensure that we actually parsed file sections, otherwise parse them
+        if not self._file_sections and self._all_report_text:
+            self._build_file_sections()
+            
+        for fn in checked_files:
+            # Match directly or by matching the suffix/basename
+            matched_section = None
+            matched_key = None
+            for sec_key, sec_val in self._file_sections.items():
+                if sec_key.lower() == fn.lower() or os.path.basename(sec_key).lower() == fn.lower():
+                    matched_section = sec_val
+                    matched_key = sec_key
+                    break
+            
+            if matched_section:
+                # If matched section doesn't start with the header box (e.g. from single-file runs), prefix it.
+                if not matched_section.strip().startswith("═"):
+                    box_section = (
+                        f"{'═' * 60}\n"
+                        f"  FILE: {matched_key}\n"
+                        f"{'═' * 60}\n"
+                        + matched_section
+                    )
+                    output_parts.append(box_section)
+                else:
+                    output_parts.append(matched_section)
+                actual_targets.append(matched_key)
+                
+        if output_parts:
+            return "\n\n".join(output_parts), actual_targets
+        else:
+            # Fallback to current text displayed in the textbox
+            return self.report_text.get("1.0", "end").strip(), ["Selected Text"]
+
+    def send_custom_prompt(self):
+        """Submit a custom prompt or question with report context to LLM"""
+        custom_prompt = self.custom_prompt_text.get("1.0", "end").strip()
+        if not custom_prompt:
+            messagebox.showwarning("Empty Question", "Please enter a question or prompt first")
+            return
+            
+        report_content, targets = self._get_target_report_content()
+        if "No analysis report" in report_content:
+            report_content = ""
+            
+        self.llm_analyze_btn.configure(state="disabled", text="Analyzing...")
+        if hasattr(self, 'send_prompt_btn'):
+            self.send_prompt_btn.configure(state="disabled", text="Sending...")
+        self.llm_status.configure(text="Running...", text_color=COLORS["warning"])
+        self.llm_text.delete("1.0", "end")
+        self.llm_text.insert(
+            "1.0",
+            f"🔄 Sending custom question to LLM for {', '.join(targets)}…\n\nQuestion: {custom_prompt}\n\nThis may take a moment."
+        )
+        
+        thread = threading.Thread(
+            target=self._run_llm_thread,
+            args=(report_content, custom_prompt),
+            daemon=True
+        )
+        thread.start()
+        
+    def clear_custom_prompt(self):
+        """Clear custom prompt textbox"""
+        self.custom_prompt_text.delete("1.0", "end")
+
+    def _call_llm_backend(self, prompt, model, model_name):
+        """Unified helper to call the configured LLM backend (Ollama or API)"""
+        try:
             # ── Remote API path ───────────────────────────────────────────
             if model.startswith("api/"):
-                prompt = self._build_analysis_prompt(report_content)
-                self.app.after(0, lambda: self.llm_status.configure(
-                    text="Calling API...", text_color=COLORS["warning"]))
                 response, err = self._call_api_llm(prompt)
-                if err:
-                    self.app.after(0, lambda: self._update_llm_result(
-                        f"API error:\n{err}", success=False))
-                else:
-                    self.app.after(0, lambda: self._update_llm_result(
-                        response, success=True))
-                return
+                return response, err
 
-            # ── Custom GGUF: import into Ollama then run ───────────────────
+            # ── Ollama run path ───────────────────────────────────────────
+            self._ollama_model_loaded = model_name
+            self._ollama_proc = subprocess.Popen(
+                ['ollama', 'run', model_name],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = self._ollama_proc.communicate(input=prompt, timeout=120)
+            returncode = self._ollama_proc.returncode
+            self._ollama_proc = None
+
+            if returncode == 0:
+                return stdout.strip(), None
+            else:
+                error_msg = stderr.strip() or "Unknown error"
+                return None, (
+                    f"Error running LLM:\n{error_msg}\n\n" +
+                    "Make sure Ollama is installed and the model is available:\n" +
+                    f"  ollama pull {model_name}"
+                )
+        except Exception as e:
+            if self._ollama_proc:
+                try:
+                    self._ollama_proc.kill()
+                except Exception:
+                    pass
+                self._ollama_proc = None
+            return None, str(e)
+
+    def _append_llm_text(self, text):
+        """Safely append text to LLM output textbox from background thread"""
+        def task():
+            self.llm_text.configure(state="normal")
+            self.llm_text.insert("end", text)
+            self.llm_text.see("end")
+        self.app.after(0, task)
+
+    def _update_llm_result_status(self, success=True):
+        """Safely reset button states and labels from background thread"""
+        def task():
+            self.llm_analyze_btn.configure(state="normal", text="▶ Analyze")
+            if hasattr(self, 'send_prompt_btn'):
+                self.send_prompt_btn.configure(state="normal", text="Send")
+            if success:
+                self.llm_status.configure(text="✓ Complete", text_color=COLORS["success"])
+                self.app.log_message("Individual LLM analysis completed")
+            else:
+                self.llm_status.configure(text="✗ Error", text_color=COLORS["error"])
+                self.app.log_message("Individual LLM analysis failed")
+        self.app.after(0, task)
+
+    def _run_llm_thread(self, report_content, custom_prompt=None):
+        """Thread worker for LLM analysis, supporting single merged vs individual files, and custom prompts."""
+        try:
+            model = self.llm_model_var.get()
+            
+            # Extract/Determine model_name
             if model == "custom":
                 gguf_path = self.gguf_path_var.get().strip()
                 if not gguf_path or not os.path.isfile(gguf_path):
@@ -2213,76 +2684,77 @@ class ResultsPanel(ctk.CTkFrame):
                         success=False
                     ))
                     return
-
-                self.app.after(0, lambda: self.llm_status.configure(
-                    text="Running...", text_color=COLORS["warning"]))
             else:
-                # Extract model name for standard ollama models
                 if model.startswith("ollama/"):
                     model_name = model.split("/")[1]
                 else:
                     model_name = model
+
+            # Determine if we should process files individually
+            pkg_individual = False
+            if hasattr(self.app, 'analysis_panel') and self.app.analysis_panel.llm_individual_var.get():
+                pkg_individual = True
+
+            if pkg_individual:
+                sections = parse_report_sections(report_content)
+                if len(sections) > 1 or (len(sections) == 1 and sections[0]['file'] != 'Loaded Report'):
+                    total_files = len(sections)
+                    self.app.after(0, lambda: self.llm_text.delete("1.0", "end"))
+                    
+                    for i, s in enumerate(sections, 1):
+                        file_name = s['file']
+                        file_body = s['content']
+                        
+                        self.app.after(0, lambda f=file_name, idx=i: self.llm_status.configure(
+                            text=f"Analyzing {idx}/{total_files}...", text_color=COLORS["warning"]))
+                        
+                        prompt = self._build_analysis_prompt(file_body, custom_prompt)
+                        
+                        self.app.after(0, lambda f=file_name, idx=i: self.app.log_message(
+                            f"LLM analyzing file {idx}/{total_files}: {f}..."))
+                        
+                        stdout_res, error_res = self._call_llm_backend(prompt, model, model_name)
+                        
+                        # Prepare header for this file
+                        file_header = (
+                            f"\n═══════════════════════════════════════════════════════════\n"
+                            f"  AI ANALYSIS: {file_name} ({i}/{total_files})\n"
+                            f"═══════════════════════════════════════════════════════════\n"
+                        )
+                        
+                        if error_res:
+                            self._append_llm_text(file_header + f"Error Analyzing file:\n{error_res}\n")
+                        else:
+                            self._append_llm_text(file_header + stdout_res + "\n")
+                            
+                    self._update_llm_result_status(success=True)
+                    return
+
+            # Otherwise, single merge analysis (normal flow)
+            self.app.after(0, lambda: self.llm_status.configure(
+                text="Running...", text_color=COLORS["warning"]))
             
-            # Build the prompt
-            prompt = self._build_analysis_prompt(report_content)
-
-            # Try to call ollama via Popen so we can kill it if needed
-            self._ollama_model_loaded = model_name
-            self._ollama_proc = subprocess.Popen(
-                ['ollama', 'run', model_name],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            stdout, stderr = self._ollama_proc.communicate(input=prompt, timeout=120)
-            returncode = self._ollama_proc.returncode
-            self._ollama_proc = None
-
-            if returncode == 0:
-                response = stdout.strip()
-                self.app.after(0, lambda: self._update_llm_result(response, success=True))
+            prompt = self._build_analysis_prompt(report_content, custom_prompt)
+            stdout_res, error_res = self._call_llm_backend(prompt, model, model_name)
+            
+            if error_res:
+                self.app.after(0, lambda: self._update_llm_result(error_res, success=False))
             else:
-                error_msg = stderr.strip() or "Unknown error"
-                self.app.after(0, lambda: self._update_llm_result(
-                    f"Error running LLM:\n{error_msg}\n\n" +
-                    "Make sure Ollama is installed and the model is available:\n" +
-                    f"  ollama pull {model_name}",
-                    success=False
-                ))
+                self.app.after(0, lambda: self._update_llm_result(stdout_res, success=True))
                 
-        except subprocess.TimeoutExpired:
-            if self._ollama_proc:
-                try:
-                    self._ollama_proc.kill()
-                except Exception:
-                    pass
-                self._ollama_proc = None
-            self.app.after(0, lambda: self._update_llm_result(
-                "Analysis timed out (120s limit).\n\n" +
-                "Try a smaller/faster model or reduce the input size.",
-                success=False
-            ))
-        except FileNotFoundError:
-            self.app.after(0, lambda: self._update_llm_result(
-                "❌ Ollama not found!\n\n" +
-                "Please install Ollama:\n" +
-                "  curl -fsSL https://ollama.ai/install.sh | sh\n\n" +
-                "Then pull a model:\n" +
-                "  ollama pull codellama",
-                success=False
-            ))
         except Exception as e:
             self.app.after(0, lambda: self._update_llm_result(
                 f"❌ Error: {str(e)}",
                 success=False
             ))
-    
+
     def _update_llm_result(self, text, success=True):
         """Update the LLM result text box"""
         self.llm_text.delete("1.0", "end")
         self.llm_text.insert("1.0", text)
         self.llm_analyze_btn.configure(state="normal", text="▶ Analyze")
+        if hasattr(self, 'send_prompt_btn'):
+            self.send_prompt_btn.configure(state="normal", text="Send")
         
         if success:
             self.llm_status.configure(text="✓ Complete", text_color=COLORS["success"])
@@ -2401,6 +2873,7 @@ class StaticAnalysisApp(ctk.CTk):
         statusbar = ctk.CTkFrame(self, fg_color=COLORS["bg_medium"], height=24)
         statusbar.pack(fill="x", side="bottom")
         statusbar.pack_propagate(False)
+        self.statusbar = statusbar
         
         ctk.CTkLabel(statusbar, text="Ready",
                     font=ctk.CTkFont(size=10),
@@ -2409,6 +2882,9 @@ class StaticAnalysisApp(ctk.CTk):
         ctk.CTkLabel(statusbar, text="v1.0 | IntelliJ-Style",
                     font=ctk.CTkFont(size=10),
                     text_color=COLORS["text"]).pack(side="right", padx=10, pady=3)
+                    
+        # Trigger initial tab placement to position the LogPanel correctly inside the Analysis Report tab
+        self.results_panel.on_tab_changed()
     
     def log_message(self, message):
         self.log_panel.log(message)
